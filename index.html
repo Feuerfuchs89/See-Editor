@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1820">
+<meta name="description" content="Gewässer- und Regattastrecken-Editor (Prototyp)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Seekoje">
+<title>Seekoje · Seekarten-Editor (Prototyp)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@500&family=Saira+Condensed:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
+<style>
+:root{--bg:#0c1820;--panel:rgba(14,30,40,.95);--field:#09141a;--ink:#e8eef0;--dim:#9db2bb;--rule:rgba(160,200,215,.2);--accent:#f2c230;--ok:#7fd49b;--bad:#ff8a78;--f-disp:"Saira Condensed","Arial Narrow",sans-serif;--f-body:"Barlow","Segoe UI",system-ui,sans-serif;--f-mono:"IBM Plex Mono",ui-monospace,monospace;color-scheme:dark}
+html,body{height:100%;margin:0}body{background:var(--bg);color:var(--ink);font:14px var(--f-body);overflow:hidden}
+#map{position:fixed;inset:0;background:#0a1e29}
+.panel{position:fixed;z-index:1000;background:var(--panel);border:1px solid var(--rule);border-radius:12px;backdrop-filter:blur(8px)}
+.bar{top:12px;left:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 8px;max-width:calc(100% - 370px)}
+.brand{font:800 21px var(--f-disp);letter-spacing:.04em;padding:0 6px}.brand b{color:var(--accent)}
+.sep{width:1px;height:22px;background:var(--rule)}.chk{color:var(--dim);font-size:13px}
+#tools{top:70px;left:12px;width:150px;padding:10px;max-height:calc(100% - 150px);overflow:auto}
+#types{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+#types button{text-align:left;display:flex;gap:6px;align-items:center}
+#types i{width:10px;height:10px;border-radius:2px;background:var(--c);flex:none}
+#side{top:12px;right:12px;width:330px;bottom:12px;overflow:auto;padding:6px 14px}
+details{border-bottom:1px solid var(--rule);padding:8px 0}summary{font:700 13px var(--f-disp);letter-spacing:.14em;text-transform:uppercase;color:var(--accent);cursor:pointer}
+#status{bottom:12px;left:170px;padding:5px 12px;font:12px var(--f-mono);color:var(--dim)}
+.lbl{font:700 13px var(--f-disp);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+button.v{font:600 13px var(--f-body);color:var(--ink);background:transparent;border:1px solid var(--rule);border-radius:7px;padding:5px 10px;cursor:pointer}
+button.v:hover{border-color:var(--dim)}button.v[aria-pressed=true]{background:var(--ink);color:var(--bg)}
+button.v.pri{background:var(--accent);color:#14202a;border-color:var(--accent)}button.v.warn{border-color:var(--bad);color:var(--bad)}button.v:disabled{opacity:.4}
+.row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+label.f{display:grid;grid-template-columns:90px 1fr;gap:6px;align-items:center;margin:5px 0;color:var(--dim);font-size:13px}
+input,select,textarea{background:var(--field);color:var(--ink);border:1px solid var(--rule);border-radius:6px;padding:4px 6px;font:12px var(--f-mono);min-width:0}
+input[type=color]{padding:0;height:26px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.it{display:block;width:100%;text-align:left;margin:2px 0;font-size:12.5px}.it.on{border-color:var(--accent);color:var(--accent)}
+.it small{color:var(--dim)}.ro{font:12px var(--f-mono);color:var(--ok)}.dim{color:var(--dim);font-size:12px}
+.src{font-size:12px;color:var(--dim);line-height:1.5}.src b{color:var(--ink)}
+.lg{display:block;margin:3px 0;font-size:13px}.lg.off{opacity:.45}.lh{font:700 11px var(--f-disp);letter-spacing:.12em;color:var(--dim);margin-top:8px}
+.mk{width:16px;height:16px;box-sizing:border-box;border:2px solid #0c1820;background:var(--c);border-radius:50%;box-shadow:0 0 0 1px #fff9}
+.mk.wegpunkt{border-radius:2px;transform:rotate(45deg)}.mk.sonstig{border-radius:3px}
+.mk.sel{box-shadow:0 0 0 3px #fff,0 0 0 5px var(--accent)}
+.leaflet-container{font-family:var(--f-body)}
+@media(max-width:900px){#side{width:260px}.bar{max-width:calc(100% - 310px)}}
+
+#map,.leaflet-container{background:#1b2a22}
+#sideBtn{display:none}
+@media(max-width:760px){
+ .bar{left:8px;right:8px;top:8px;max-width:none;flex-wrap:nowrap;overflow-x:auto;padding:5px 6px;scrollbar-width:none}
+ .bar .brand,.bar .chk,#pname{display:none}.bar button.v,#tools button.v{white-space:nowrap;padding:6px 9px;flex:none}
+ #sideBtn{display:block}
+ #tools{top:58px;left:8px;right:8px;width:auto;max-height:none;padding:6px;overflow-x:auto;scrollbar-width:none}
+ #tools .lbl{display:none}#types{flex-direction:row;margin:0}
+ #side{top:auto;left:8px;right:8px;bottom:52px;width:auto;max-height:50vh;transform:translateY(calc(100% + 60px));transition:transform .2s}
+ #side.open{transform:none}
+ #status{left:8px;right:8px;bottom:8px;white-space:normal;font-size:11px}#coord{display:none}
+ .leaflet-control-zoom{display:none}.leaflet-bottom.leaflet-left{bottom:48px}
+}
+[hidden]{display:none!important}
+#prof{left:50%;transform:translateX(-50%);bottom:56px;width:min(720px,96vw);padding:10px 12px;z-index:1200;max-height:72vh;overflow:auto}
+#prof .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+#prof svg{width:100%;height:auto;display:block}#prof svg text{fill:#9db2bb;font:11px var(--f-mono)}
+dialog{background:var(--bg);color:var(--ink);border:1px solid var(--rule);border-radius:12px;width:min(440px,92vw);padding:14px 16px}
+dialog::backdrop{background:rgba(0,0,0,.55)}dialog h3{margin:0 0 6px;font:800 20px var(--f-disp);letter-spacing:.06em;color:var(--accent)}
+#pname{font:600 13px var(--f-body);color:var(--dim);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 4px}
+#chkOut{margin-top:6px;font-size:12.5px;line-height:1.45}#chkOut div{margin:2px 0}.ci-err{color:var(--bad)}.ci-warn{color:var(--accent)}.ci-ok{color:var(--ok)}.ci-info{color:var(--dim)}
+#npRes{margin-top:6px;max-height:190px;overflow:auto}
+.bs{display:block}.bs.sel{filter:drop-shadow(0 0 3px #fff) drop-shadow(0 0 2px #f2c230)}
+</style>
+</head><body>
+<div id="map"></div>
+<div class="panel bar"><span class="brand">SEE<b>KOJE</b></span><span id="pname" title="Projektname"></span>
+ <button class="v" id="newTop" title="Neues Projekt anlegen">＋ Neu</button>
+ <button class="v" id="sideBtn" aria-label="Panel">☰ Panel</button>
+ <button class="v" data-mode="select" title="Auswählen (Esc) · Shift = mehrere">⬚ Wählen</button>
+ <button class="v" data-mode="move" title="Objekte verschieben">✥ Bewegen</button>
+ <button class="v" data-mode="edit" title="Stützpunkte bearbeiten">✎ Punkte</button>
+ <button class="v" data-mode="rotate" title="Linien/Flächen drehen">⟳ Drehen</button>
+ <button class="v" data-mode="remove" title="Klick löscht">✕ Löschen</button>
+ <button class="v" data-mode="measure" title="Distanz messen">⟷ Messen</button>
+ <button class="v" data-mode="pickwater" title="Wasserfläche antippen und aus OpenStreetMap übernehmen">💧 See wählen</button>
+ <span class="sep"></span>
+ <button class="v" id="undo" title="Strg+Z">↶</button><button class="v" id="redo" title="Strg+Y">↷</button>
+ <label class="chk"><input type="checkbox" id="snap" checked> Objektfang</label>
+</div>
+<div class="panel" id="tools"><div class="lbl">Zeichnen</div><div id="types"></div></div>
+<aside class="panel" id="side">
+ <details open><summary>Eigenschaften</summary><div id="props"></div></details>
+ <details open><summary>Objekte <span id="cnt"></span></summary><div id="list"></div></details>
+ <details open><summary>Ebenen</summary><div id="layers"></div>
+  <div class="row"><button class="v" id="osmLoad">OSM-Daten für Ausschnitt laden</button><button class="v" id="seaImp">Tonnen übernehmen</button></div></details>
+ <details open><summary>Messdaten &amp; Profil</summary>
+ <label class="f">Art<select id="pkind"><option value="depth">Tiefe (m)</option><option value="height">Höhe (m ü. NHN)</option></select></label>
+ <label class="f">Koordinaten<select id="pcrs"><option value="wgs">WGS84: Breite;Länge;Wert</option><option value="utm">UTM33: E;N;Wert (GeoSN-XYZ)</option></select></label>
+ <label class="f">Wasserspiegel<input id="wl" type="number" step="any" placeholder="m ü. NHN, leer = unbekannt"></label>
+ <div class="row"><button class="v" id="pload">CSV/XYZ laden</button><button class="v warn" id="pclear">Messdaten löschen</button></div>
+ <div class="dim" id="pinfo"></div><input type="file" id="pfile" hidden>
+ <div class="lbl" style="margin-top:10px">Tiefe schätzen (Modell)</div>
+ <label class="f">Neigung (%)<input id="dSlope" type="number" min="1" max="100" step="1" value="12"></label>
+ <label class="f">Max. Tiefe (m)<input id="dMax" type="number" min="1" step="0.5" value="8"></label>
+ <label class="f">Raster (m)<input id="dStep" type="number" min="10" step="5" value="25"></label>
+ <div class="row"><button class="v" id="depthEst">Tiefe aus Ufer-Abstand schätzen</button></div>
+ <div class="dim">Tiefe = Abstand zum Ufer × Neigung, begrenzt auf die Maximaltiefe. Reine Näherung für Seen ohne Lotungen; klar als Schätzung markiert. Tiefenlinien mit Tiefenwert haben Vorrang.</div></details>
+ <details open><summary>Umgebung &amp; Gelände (Spiel)</summary>
+ <div class="row"><button class="v pri" id="envLoad">Umgebung 1 km laden (OSM)</button></div>
+ <label class="f">Rasterweite<select id="hcs"><option>2</option><option selected>5</option><option>10</option><option>25</option></select></label>
+ <div class="row"><button class="v" id="hCoarse">Höhen grob laden (90 m)</button></div>
+ <div class="dim">Genau: GeoSN-DGM1 (XYZ, mehrere Kacheln möglich) oben unter „Messdaten“ mit Art „Höhe“ und UTM33 laden.</div>
+ <label class="f">Ufer vereinfachen<select id="simp"><option value="0">keine</option><option value="0.5">0,5 m</option><option value="1" selected>1 m</option><option value="2">2 m</option><option value="5">5 m</option></select></label>
+ <div class="row"><button class="v" id="chk">Daten prüfen</button><button class="v" id="xMask">Wasser-Maske .png ⤓</button><button class="v" id="xMap">Revierkarte .png ⤓</button></div><div id="chkOut"></div>
+ <div class="row"><button class="v" id="xEnv">Umgebung GeoJSON ⤓</button><button class="v" id="xGame">Spiel-Export (m) ⤓</button><button class="v" id="xAsc">Höhen .asc ⤓</button><button class="v" id="xR16">Höhen .r16 ⤓</button><button class="v warn" id="envClear">Umgebung/Höhen löschen</button></div>
+ <label class="f">Höhe Wald (m)<input id="hForest" type="number" min="0" step="1" value="15"></label>
+ <label class="f">Höhe Gebäude (m)<input id="hBuild" type="number" min="0" step="1" value="8"></label>
+ <div class="dim">Standardhöhen für die Windabschattung, wenn OSM keine Höhe (height / building:levels) kennt. Im Export als <code>h_m</code> mit Quelle <code>h_src</code>.</div>
+ <div class="row"><button class="v" id="windLoad">Windstatistik laden (Open-Meteo)</button></div><div class="dim" id="winfo"></div>
+ <div class="dim" id="einfo"></div></details>
+ <details open><summary>Regattabahn (Assistent)</summary>
+ <label class="f">Form<select id="cForm"><option value="updown">Up-and-Down</option><option value="ablauf">Up-and-Down mit Ablauftonne</option><option value="leetor">Up-and-Down mit Leetor</option><option value="dreieck">Dreieck</option></select></label>
+ <label class="f">Wind aus (°)<input id="cWind" type="number" min="0" max="360" step="1" value="270"></label>
+ <label class="f">Schenkel (m)<input id="cLen" type="number" min="50" step="10" value="600"></label>
+ <label class="f">Startlinie (m)<input id="cWid" type="number" min="10" step="10" value="150"></label>
+ <div class="row"><button class="v pri" id="cPlace">Bahn auf Karte setzen</button><button class="v" id="cCenter">In Kartenmitte</button></div>
+ <div class="dim">Wind = Richtung, aus der er weht (270 = Westwind). „Auf Karte setzen“: danach die Mitte der Startlinie antippen. Erzeugt Start-/Ziellinie, Tonnen und Kurslinie als Gruppe (alle Tonnen mit Namen „Bahn n · …“).</div></details>
+ <details open><summary>Projekt</summary><div class="row">
+  <button class="v" id="newBtn">＋ Neues Projekt</button><button class="v pri" id="saveP">Speichern (JSON)</button><button class="v" id="loadP">Laden</button>
+  <button class="v" id="expG">GeoJSON ⤓</button><button class="v" id="impG">GeoJSON/GPX/KML ⤒</button>
+  <button class="v" id="expX">GPX ⤓</button><button class="v" id="demo">Demo-Daten</button>
+  <button class="v warn" id="clear">Alles leeren</button></div>
+  <input type="file" id="file" hidden></details>
+ <details open><summary>Quellen &amp; Lizenzen (Namensnennung)</summary>
+  <div class="lh">FÜR DIESES PROJEKT ERFORDERLICH</div><div class="src" id="attrNow"></div>
+  <label class="f">Weitere Quellen<textarea id="attrExtra" rows="3" placeholder="Eine Zeile je Quelle, z. B. Höhendaten: GeoSN, Datenlizenz Deutschland – Namensnennung 2.0"></textarea></label>
+  <div class="row"><button class="v pri" id="xAttr">Namensnennung .txt ⤓</button></div>
+  <div class="lh">ALLGEMEIN</div><div class="src" id="src"></div></details>
+</aside>
+<dialog id="newP"><h3>Neues Projekt</h3>
+ <div class="dim">Startet ein leeres Projekt an einem beliebigen Ort. Danach auf eine Wasserfläche tippen, um das Gewässer aus OpenStreetMap zu übernehmen.</div>
+ <label class="f">Name<input id="npName" placeholder="z. B. Kulkwitzer See" maxlength="80"></label>
+ <label class="f">Ort suchen<input id="npQ" placeholder="Ortsname oder Breite, Länge"></label>
+ <div class="row"><button type="button" class="v" id="npSearch">Suchen</button><button type="button" class="v" id="npView">Aktuellen Kartenausschnitt nehmen</button></div>
+ <div id="npRes"></div><div class="ro" id="npSel"></div>
+ <label class="lg" id="npSaveRow"><input type="checkbox" id="npSave" checked> Aktuelles Projekt vorher als Datei sichern</label>
+ <div class="row"><button type="button" class="v pri" id="npOk">Projekt anlegen</button><button type="button" class="v" id="npCancel">Abbrechen</button></div>
+</dialog>
+<div class="panel" id="prof" hidden><div class="ph"><b id="ptitle">Profil</b><span><button class="v" id="pcsv">CSV ⤓</button> <button class="v" id="pclose" aria-label="Schließen">✕</button></span></div><div id="pbody"></div><div class="dim" id="pnote"></div></div>
+<div class="panel" id="status"><span id="coord">–</span> · <span id="meas">Messen: Modus „Messen“ wählen</span> · <span id="msg"></span></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
+<script src="https://unpkg.com/proj4@2.11.0/dist/proj4.js"></script>
+<script>
+// Zentrale Konfiguration. KEINE API-Schlüssel hier eintragen (Frontend ist öffentlich lesbar).
+window.CFG={
+  center:[51.26944,12.33528],zoom:14,            // grobe Lage Cospudener See (nur Startansicht)
+  overpass:'https://overpass-api.de/api/interpreter',
+  overpassAlt:['https://overpass.kumi.systems/api/interpreter','https://overpass.private.coffee/api/interpreter'],   // Ausweichserver bei Überlast
+  tiles:{
+    osm:{url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',attr:'© OpenStreetMap-Mitwirkende (ODbL)'},
+    seamap:{url:'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png',attr:'Seezeichen © OpenSeaMap-Mitwirkende'}
+  },
+  // GeoSN: Dienst-URL, Layername und Lizenz VOR dem Eintragen selbst prüfen (geodaten.sachsen.de).
+  // Leer = Ebene bleibt deaktiviert. Es werden keine URLs geraten.
+  geosn:{
+    dop:{label:'Luftbild (GeoSN)',wms:'',layers:'',format:'image/jpeg',attr:'© GeoSN – Lizenz prüfen',stand:''},
+    dgm:{label:'Gelände (GeoSN)',wms:'',layers:'',format:'image/png',attr:'© GeoSN – Lizenz prüfen',stand:''}
+  }
+};
+</script>
+<script>
+(()=>{'use strict';
+/* ---------- Projektion: Speicherung WGS84 (EPSG:4326), Messung in ETRS89/UTM33N (EPSG:25833) ---------- */
+proj4.defs('EPSG:25833','+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
+const fwd=ll=>proj4('EPSG:4326','EPSG:25833',[ll.lng,ll.lat]);
+const inv=xy=>{const p=proj4('EPSG:25833','EPSG:4326',xy);return L.latLng(p[1],p[0])};
+const dist=(a,b)=>{const p=fwd(a),q=fwd(b);return Math.hypot(p[0]-q[0],p[1]-q[1])};
+const rings=a=>Array.isArray(a[0])?a.flatMap(rings):[a];
+const seg=r=>{let s=0;for(let i=1;i<r.length;i++)s+=dist(r[i-1],r[i]);return s};
+const area=r=>{const p=r.map(fwd);let s=0;for(let i=0;i<p.length;i++){const j=(i+1)%p.length;s+=p[i][0]*p[j][1]-p[j][0]*p[i][1]}return Math.abs(s)/2};
+const fmt=m=>m<1000?m.toFixed(1)+' m':(m/1000).toFixed(3)+' km';
+const $=s=>document.querySelector(s);
+const el=(t,a={},...c)=>{const e=document.createElement(t);Object.assign(e,a);e.append(...c);return e};
+const safeColor=c=>/^#[0-9a-f]{3,8}$/i.test(c||'')?c:null;
+async function ovp(q){let last;for(const u of [CFG.overpass,...(CFG.overpassAlt||[])]){try{const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});
+  if(!r.ok)throw Error('Overpass HTTP '+r.status+(r.status===429||r.status===504?' (Server ausgelastet)':''));return await r.json()}catch(e){last=e}}throw last}
+const msg=(t,bad)=>{const m=$('#msg');m.textContent=t;m.style.color=bad?'var(--bad)':'var(--ok)';clearTimeout(msg.t);msg.t=setTimeout(()=>m.textContent='',6000)};
+
+/* ---------- Objekttypen (Eigene Objekte) ---------- */
+const T={
+ gewaesser:{l:'Gewässer',g:'Polygon',s:'Polygon',c:'#2f86b8',fo:.55},
+ hafen:{l:'Hafenbecken',g:'Polygon',s:'Polygon',c:'#4aa3c7'},
+ mole:{l:'Mole',g:'Line',s:'Line',c:'#c9c9c9',w:6},
+ steg:{l:'Steg',g:'Line',s:'Line',c:'#c8a46a',w:5},
+ anleger:{l:'Anleger',g:'Line',s:'Line',c:'#e0b070',w:8},
+ gebaeude:{l:'Gebäude',g:'Polygon',s:'Polygon',c:'#b48a6a'},
+ boje:{l:'Boje / Tonne',g:'Point',s:'Marker',c:'#ff7a1a'},
+ startziel:{l:'Start-/Ziellinie',g:'Line',s:'Line',c:'#ffd23f',w:4},
+ wegpunkt:{l:'Wegpunkt',g:'Point',s:'Marker',c:'#5fb4ff'},
+ kurs:{l:'Kurslinie',g:'Line',s:'Line',c:'#5fb4ff',d:'8 6'},
+ sperrzone:{l:'Sperrzone',g:'Polygon',s:'Polygon',c:'#ff4f5f',d:'6 5'},
+ ufer:{l:'Uferlinie',g:'Line',s:'Line',c:'#7fd49b'},
+ vegetation:{l:'Vegetation',g:'Polygon',s:'Polygon',c:'#4caf50'},
+ tiefenlinie:{l:'Tiefenlinie',g:'Line',s:'Line',c:'#5ec8e5',d:'3 4'},
+ profil:{l:'Profil (Schnitt)',g:'Line',s:'Line',c:'#ffffff',d:'2 6',w:2},
+ sonstig:{l:'Sonstiges',g:'Any',s:'Line',c:'#cccccc'}};
+
+/* ---------- Karte ---------- */
+const map=L.map('map',{zoomControl:false,maxZoom:19}).setView(CFG.center,CFG.zoom);
+L.control.zoom({position:'bottomright'}).addTo(map);
+L.control.scale({metric:true,imperial:false,position:'bottomleft'}).addTo(map);
+map.pm.setLang('de');map.pm.setGlobalOptions({snappable:true,snapDistance:15,allowSelfIntersection:true});
+const tl=(u,o)=>L.tileLayer(u,{maxZoom:19,...o});
+const bg={
+ osm:tl(CFG.tiles.osm.url,{attribution:CFG.tiles.osm.attr}).addTo(map),
+ seamap:tl(CFG.tiles.seamap.url,{attribution:CFG.tiles.seamap.attr}).addTo(map)};
+for(const k in CFG.geosn){const c=CFG.geosn[k];if(c.wms)bg[k]=L.tileLayer.wms(c.wms,{layers:c.layers,format:c.format,attribution:c.attr,maxZoom:19})}
+const OSMC={water:['Wasser (OSM)','#2a6f97',.5],land:['Land/Gelände (OSM)','#3b6b3b',.25],path:['Wege (OSM)','#e6d7aa',0],build:['Gebäude (OSM)','#8a7a6a',.5],harbor:['Häfen/Stege/Seezeichen (OSM)','#f2c230',.3]};
+const osmG={};for(const k in OSMC)osmG[k]=L.featureGroup().addTo(map);
+const G={};for(const k in T)G[k]=L.featureGroup().addTo(map);   // Nutzerobjekte, je Typ eine Ebene
+const all=()=>Object.values(G).flatMap(g=>g.getLayers());
+const gk=l=>l instanceof L.Marker?'Point':l instanceof L.Polygon?'Polygon':'Line';
+
+/* ---------- Objekte ---------- */
+const sel=new Set();let mode='select',pending='steg',counter=0;
+function paint(l){const p=l.feature.properties,t=T[p.type],c=safeColor(p.color)||t.c,s=sel.has(l);
+ if(l instanceof L.Marker&&p.type==='boje'){const z=Math.round(26*(+p.size||1));l.setIcon(L.divIcon({className:'',iconSize:[z,z],iconAnchor:[z/2,z/2],html:shapeSVG(p.shape,c,s,z)}))}else if(l instanceof L.Marker)l.setIcon(L.divIcon({className:'',iconSize:[18,18],iconAnchor:[9,9],html:`<div class="mk ${p.type}${s?' sel':''}" style="--c:${c}"></div>`}));
+ else l.setStyle({color:s?'#fff':c,weight:(t.w||3)+(s?2:0),dashArray:t.d||null,fillColor:c,fillOpacity:gk(l)==='Polygon'?(t.fo||.3):0})}
+function adopt(l,props){const g=gk(l);const p={name:'',type:'sonstig',source:'manuell',estimated:false,...props};
+ if(!T[p.type]||(T[p.type].g!=='Any'&&T[p.type].g!==g))p.type='sonstig';
+ if(!p.id)p.id='o'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);if(p.type==='gewaesser'&&p.autoOutline===undefined)p.autoOutline=true;if(p.outlineOf)l.options.pmIgnore=true;
+ l.feature={type:'Feature',properties:p};G[p.type].addLayer(l);paint(l);
+ l.on('click',e=>{if(mode==='select'){L.DomEvent.stopPropagation(e);pick(l,e.originalEvent.shiftKey||e.originalEvent.ctrlKey)}});
+ l.on('pm:edit pm:dragend pm:rotateend',()=>commit());return l}
+function pick(l,add){const old=[...sel];if(!add)sel.clear();
+ if(l){const gid=l.feature.properties.group,set=gid?all().filter(x=>x.feature.properties.group===gid):[l],has=sel.has(l);set.forEach(x=>add&&has?sel.delete(x):sel.add(x))}
+ old.concat([...sel]).forEach(paint);ui()}
+function drop(l){sel.delete(l);G[l.feature.properties.type].removeLayer(l);map.removeLayer(l)}
+
+/* ---------- Undo/Redo (Snapshots der Nutzerobjekte) ---------- */
+const ser=()=>JSON.stringify({type:'FeatureCollection',features:all().map(l=>l.toGeoJSON())});
+let hist=[],hi=-1;
+/* Automatische Umrandung: Flächen mit autoOutline erhalten eine abgeleitete Uferlinie, die bei jeder Änderung nachgeführt wird */
+function syncOutlines(){const ls=all();
+ ls.filter(l=>l.feature.properties.outlineOf).forEach(o=>{const par=ls.find(x=>x.feature.properties.id===o.feature.properties.outlineOf);if(!par||!par.feature.properties.autoOutline)drop(o)});
+ ls.filter(l=>gk(l)==='Polygon'&&l.feature.properties.autoOutline).forEach(par=>{const p=par.feature.properties,co=rings(par.getLatLngs()).map(r=>r.concat([r[0]])),nm='Ufer: '+(p.name||T[p.type].l);
+  let o=all().find(x=>x.feature.properties.outlineOf===p.id);
+  if(o){o.setLatLngs(co);Object.assign(o.feature.properties,{name:nm,estimated:p.estimated})}
+  else adopt(L.polyline(co),{type:'ufer',name:nm,outlineOf:p.id,estimated:p.estimated,source:'abgeleitet aus Fläche (automatisch)'})})}
+function commit(){syncOutlines();autosave();const s=ser();if(s===hist[hi]){ui();return}hist=hist.slice(0,hi+1);hist.push(s);if(hist.length>100)hist.shift();hi=hist.length-1;ui()}
+function restore(s){all().forEach(drop);sel.clear();addFC(JSON.parse(s));setMode(mode);ui()}
+const undo=()=>{if(hi>0)restore(hist[--hi])},redo=()=>{if(hi<hist.length-1)restore(hist[++hi])};
+
+/* ---------- GeoJSON-Import (Validierung) ---------- */
+function addFC(d){if(!d||typeof d!=='object')throw Error('Keine gültige GeoJSON-Datei');
+ if(d.type==='Feature')d={type:'FeatureCollection',features:[d]};else if(d.coordinates&&d.type)d={type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:d}]};
+ if(d.type!=='FeatureCollection'||!Array.isArray(d.features))throw Error('Erwartet FeatureCollection');
+ if(!d.features.length)throw Error('Datei enthält keine Objekte');
+ let n=0;const gj=L.geoJSON(d,{pointToLayer:(f,ll)=>L.marker(ll)});
+ gj.eachLayer(l=>{if(l instanceof L.Marker||l instanceof L.Polyline){adopt(l,{...(l.feature.properties||{})});n++}});
+ if(!n)throw Error('Keine unterstützten Geometrien (Punkt/Linie/Fläche)');return n}
+
+/* ---------- Modi ---------- */
+function setMode(m,type){mode=m;map.pm.disableDraw();map.pm.disableGlobalEditMode();map.pm.disableGlobalDragMode();map.pm.disableGlobalRotateMode();map.pm.disableGlobalRemovalMode();
+ if(m==='draw'){pending=type;const t=T[type];map.pm.enableDraw(t.s,{pathOptions:{color:t.c,weight:t.w||3,dashArray:t.d||null},markerStyle:{}})}
+ if(m==='edit')map.pm.enableGlobalEditMode();if(m==='move')map.pm.enableGlobalDragMode();
+ if(m==='rotate')map.pm.enableGlobalRotateMode();if(m==='remove')map.pm.enableGlobalRemovalMode();
+ document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.mode===m));
+ document.querySelectorAll('#types button').forEach(b=>b.setAttribute('aria-pressed',m==='draw'&&b.dataset.t===type));
+ map.getContainer().style.cursor=m==='measure'||m==='pickwater'||m==='course'?'crosshair':'';if(m==='pickwater')msg('Tippe auf eine Wasserfläche (Daten: OpenStreetMap).');if(m==='course')msg('Tippe auf die Mitte der Startlinie.')}
+map.on('pm:create',e=>{if(mode!=='draw')return;adopt(e.layer,{type:pending,name:T[pending].l+' '+(++counter)});pick(e.layer);commit();if(T[pending].s!=='Marker')setMode('select');if(pending==='profil')showProfile(e.layer)});
+map.on('pm:remove',e=>{if(e.layer&&e.layer.feature){drop(e.layer);commit()}});
+let mp=[];const ml=L.polyline([],{color:'#fff',dashArray:'4 6',weight:2,interactive:false}).addTo(map);
+map.on('click',e=>{if(mode==='measure'){mp.push(e.latlng);ml.setLatLngs(mp);$('#meas').textContent=`Messung: ${fmt(seg(mp))} (${mp.length} Pkt., Esc = neu)`}else if(mode==='pickwater')pickWater(e.latlng);else if(mode==='course'){makeCourse(e.latlng)}else if(mode==='select')pick(null)});
+map.on('mousemove',e=>{const p=fwd(e.latlng);$('#coord').textContent=`${e.latlng.lat.toFixed(6)}°N ${e.latlng.lng.toFixed(6)}°E · UTM33 ${p[0].toFixed(0)} / ${p[1].toFixed(0)}`});
+$('#snap').onchange=e=>map.pm.setGlobalOptions({snappable:e.target.checked});
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
+for(const k in T){const b=el('button',{className:'v'},el('i'),T[k].l);b.dataset.t=k;b.firstChild.style.setProperty('--c',T[k].c);b.onclick=()=>setMode('draw',k);$('#types').append(b)}
+$('#undo').onclick=undo;$('#redo').onclick=redo;
+addEventListener('keydown',e=>{const tg=e.target.tagName;if(/INPUT|TEXTAREA|SELECT/.test(tg)||$('#newP').open)return;
+ if(e.key==='Escape'){mp=[];ml.setLatLngs([]);$('#meas').textContent='Messen: Modus „Messen“ wählen';setMode('select');pick(null)}
+ else if(e.key==='Delete'&&sel.size){[...sel].forEach(drop);commit()}
+ else if(e.ctrlKey&&e.key==='z'){e.preventDefault();undo()}else if(e.ctrlKey&&e.key==='y'){e.preventDefault();redo()}
+ else if(e.ctrlKey&&e.key==='s'){e.preventDefault();saveP()}});
+
+/* ---------- Oberfläche: Liste & Eigenschaften ---------- */
+function scaleBy(l,f){const pts=rings(l.getLatLngs()).flat().map(fwd),cx=pts.reduce((s,p)=>s+p[0],0)/pts.length,cy=pts.reduce((s,p)=>s+p[1],0)/pts.length;
+ const m=a=>Array.isArray(a)?a.map(m):(q=>inv([cx+(q[0]-cx)*f,cy+(q[1]-cy)*f]))(fwd(a));l.setLatLngs(m(l.getLatLngs()))}
+function ui(){attrShow();$('#undo').disabled=hi<=0;$('#redo').disabled=hi>=hist.length-1;
+ const ls=all();$('#cnt').textContent=`(${ls.length})`;const box=$('#list');box.replaceChildren();
+ ls.sort((a,b)=>a.feature.properties.type.localeCompare(b.feature.properties.type)).forEach(l=>{const p=l.feature.properties;
+  const b=el('button',{className:'v it'+(sel.has(l)?' on':'')},p.name||'(ohne Name)',el('small',{},` · ${T[p.type].l}${p.group?' ⛓':''}${p.demo?' · DEMO':''}`));
+  b.onclick=e=>{pick(l,e.shiftKey);if(l.getBounds)map.fitBounds(l.getBounds().pad(.5),{maxZoom:18,animate:false});else map.panTo(l.getLatLng())};box.append(b)});
+ if(!ls.length)box.append(el('div',{className:'dim'},'Noch keine Objekte. Typ links wählen und zeichnen, oder GeoJSON/Demo laden.'));
+ const pb=$('#props');pb.replaceChildren();
+ if(!sel.size){pb.append(el('div',{className:'dim'},'Kein Objekt gewählt.'));return}
+ if(sel.size>1){pb.append(el('div',{},`${sel.size} Objekte gewählt`));const r=el('div',{className:'row'});
+  const gb=el('button',{className:'v',textContent:'Gruppieren'}),ug=el('button',{className:'v',textContent:'Gruppe lösen'}),db=el('button',{className:'v warn',textContent:'Löschen'});
+  gb.onclick=()=>{const id='g'+Date.now().toString(36);sel.forEach(l=>l.feature.properties.group=id);commit()};
+  ug.onclick=()=>{sel.forEach(l=>delete l.feature.properties.group);commit()};db.onclick=()=>{[...sel].forEach(drop);commit()};
+  r.append(gb,ug,db);pb.append(r);return}
+ const l=[...sel][0],p=l.feature.properties,g=gk(l);
+ const row=(lab,i)=>pb.append(el('label',{className:'f'},lab,i));
+ const txt=(k,type='text',extra={})=>{const i=el('input',{type,value:p[k]??'',...extra});i.onchange=()=>{p[k]=type==='number'?(i.value===''?null:+i.value):i.value;commit()};return i};
+ row('Name',txt('name'));
+ const ty=el('select');for(const k in T)if(T[k].g==='Any'||T[k].g===g)ty.append(el('option',{value:k,textContent:T[k].l,selected:k===p.type}));
+ ty.onchange=()=>{G[p.type].removeLayer(l);p.type=ty.value;G[p.type].addLayer(l);paint(l);commit()};row('Typ',ty);
+ if(p.type==='gewaesser'&&p.osm&&p.osm.tags&&isFinite(parseFloat(p.osm.tags.ele))){const ev=parseFloat(p.osm.tags.ele),eb=el('button',{className:'v',textContent:`Wasserspiegel ${ev} m ü. NHN (OSM-Tag) übernehmen`});eb.onclick=()=>{$('#wl').value=ev;msg('Wasserspiegel aus OSM-Tag „ele“ gesetzt – bitte prüfen')};pb.append(el('div',{className:'row'},eb))}
+ if(p.type==='tiefenlinie')row('Tiefe (m)',txt('depth','number',{step:'any',placeholder:'Pflicht für Profil'}));
+ if(p.type==='profil'){const pb2=el('button',{className:'v pri',textContent:'Profil anzeigen'});pb2.onclick=()=>showProfile(l);pb.append(el('div',{className:'row'},pb2))}
+ if(g==='Point'){const ll=l.getLatLng(),la=el('input',{type:'number',step:'any',value:ll.lat.toFixed(6)}),lo=el('input',{type:'number',step:'any',value:ll.lng.toFixed(6)});
+  la.onchange=lo.onchange=()=>{if(isFinite(+la.value)&&isFinite(+lo.value)){l.setLatLng([+la.value,+lo.value]);commit()}};row('Breite °N',la);row('Länge °E',lo)}
+ else{const c=l.getBounds().getCenter(),rs=rings(l.getLatLngs());
+  row('Mittelpunkt',el('span',{className:'ro',textContent:`${c.lat.toFixed(5)}, ${c.lng.toFixed(5)}`}));
+  row(g==='Polygon'?'Umfang':'Länge',el('span',{className:'ro',textContent:fmt(rs.reduce((s,r)=>s+seg(g==='Polygon'?r.concat(r[0]):r),0))}));
+  if(g==='Polygon')row('Fläche',el('span',{className:'ro',textContent:Math.round(area(rs[0])).toLocaleString('de')+' m²'}));
+  const sc=el('input',{type:'number',value:100,min:1,step:5}),sb=el('button',{className:'v',textContent:'Skalieren %'});sb.onclick=()=>{if(+sc.value>0){scaleBy(l,sc.value/100);commit()}};
+  const w=el('div',{className:'row'});w.append(sc,sb);pb.append(w)}
+ const co=el('input',{type:'color',value:safeColor(p.color)?.slice(0,7)||T[p.type].c});co.onchange=()=>{p.color=co.value;paint(l);commit()};row('Farbe',co);
+ if(p.type==='boje'){const sh=el('select');SHAPES.forEach(([k,n])=>sh.append(el('option',{value:k,textContent:n,selected:(p.shape||'spherical')===k})));sh.onchange=()=>{p.shape=sh.value;paint(l);commit()};row('Form',sh);
+  const sz=el('select');[['0.7','klein'],['1','normal'],['1.4','groß']].forEach(([v,n])=>sz.append(el('option',{value:v,textContent:n,selected:String(p.size||1)===v})));sz.onchange=()=>{p.size=+sz.value;paint(l);commit()};row('Größe',sz);
+  const sw=el('div',{className:'row'});COLS.forEach(([n,cc])=>{const bt=el('button',{className:'v',title:n,ariaLabel:n});bt.style.cssText=`background:${cc};width:30px;height:30px;padding:0`;bt.onclick=()=>{p.color=cc;paint(l);commit()};sw.append(bt)});pb.append(sw)}
+ row('Höhe (m)',txt('height','number',{step:'any',placeholder:'unbekannt'}));row('Tiefgang (m)',txt('draft','number',{step:'any',placeholder:'unbekannt'}));
+ const nt=el('textarea',{rows:3,value:p.notes||''});nt.onchange=()=>{p.notes=nt.value;commit()};row('Notizen',nt);
+ row('Quelle',txt('source'));
+ if(g==='Polygon'){const ao=el('input',{type:'checkbox',checked:!!p.autoOutline});ao.onchange=()=>{p.autoOutline=ao.checked;commit()};row('Uferlinie auto',ao)}
+ if(p.outlineOf)pb.append(el('div',{className:'dim',textContent:'Automatisch aus der Fläche abgeleitet; manuelle Änderungen werden überschrieben. Abschalten: Fläche wählen, „Uferlinie auto“ abwählen.'}));
+ const es=el('input',{type:'checkbox',checked:!!p.estimated});es.onchange=()=>{p.estimated=es.checked;commit()};row('geschätzt',es);
+ const db=el('button',{className:'v warn',textContent:'Objekt löschen'});db.onclick=()=>{drop(l);commit()};pb.append(el('div',{className:'row'},db))}
+
+/* ---------- Ebenenliste ---------- */
+function layerUI(){const box=$('#layers');const add=(lab,lay,on,note)=>{const cb=el('input',{type:'checkbox',checked:on,disabled:!lay});
+  if(lay)cb.onchange=()=>cb.checked?map.addLayer(lay):map.removeLayer(lay);
+  box.append(el('label',{className:'lg'+(lay?'':' off'),title:note||''},cb,' '+lab+(lay?'':' – nicht konfiguriert')))};
+ const h=t=>box.append(el('div',{className:'lh'},t));
+ h('HINTERGRUND');add('Karte (OSM)',bg.osm,true);add(CFG.geosn.dop.label,bg.dop,false,'CFG.geosn in index.html');add(CFG.geosn.dgm.label,bg.dgm,false,'CFG.geosn in index.html');add('Seezeichen (OpenSeaMap)',bg.seamap,true);
+ h('IMPORTIERT (nur lesbar)');for(const k in OSMC)add(OSMC[k][0],osmG[k],true);
+ h('MESSDATEN');add('Messpunkte Tiefe',mpG,true);add('Höhenraster (Vorschau)',hG,true);h('EIGENE OBJEKTE');for(const k in T)add(T[k].l,G[k],true)}
+
+/* ---------- OSM-Import via Overpass ---------- */
+const cat=t=>t.seamark||t['seamark:type']||/marina|slipway/.test(t.leisure||'')||/pier|breakwater|groyne/.test(t.man_made||'')?'harbor':t.building?'build':t.highway?'path':t.natural==='water'||t.waterway||t.water?'water':'land';
+$('#osmLoad').onclick=()=>envLoad(false);
+
+/* ---------- Speichern / Laden / Export ---------- */
+function dl(name,text,mime){const a=el('a',{href:URL.createObjectURL(new Blob([text],{type:mime})),download:name});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+/* ---------- Projekt: Name, Speichern, Neu, Autosave ---------- */
+const PROJ={name:'Cospudener See',extra:''};
+const slug=t=>(t||'').toLowerCase().replace(/[äöüß]/g,c=>({ä:'ae',ö:'oe',ü:'ue',ß:'ss'}[c])).replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'projekt';
+function setName(n){PROJ.name=String(n||'').trim()||'Unbenanntes Projekt';$('#pname').textContent=PROJ.name;document.title=PROJ.name+' · Seekoje'}
+const projectData=full=>({format:'seeeditor-1',name:PROJ.name,crs:'EPSG:4326',saved:new Date().toISOString(),view:{center:map.getCenter(),zoom:map.getZoom()},features:JSON.parse(ser()),points:exportM(full),environment:exportE(),heights:exportG(),wind:WIND.d,extra:PROJ.extra||'',attribution:attrLines()});
+function saveP(){dl(slug(PROJ.name)+'.json',JSON.stringify(projectData(),null,1),'application/json');msg('Projekt gespeichert')}
+function applyProject(d){if(!d||d.format!=='seeeditor-1')throw Error('Kein Projekt dieses Editors');
+ all().forEach(drop);sel.clear();if(d.features&&d.features.features&&d.features.features.length)addFC(d.features);
+ $('#wl').value='';importM(d.points);importE(d.environment);importG(d.heights);WIND.d=d.wind||null;windInfo();PROJ.extra=d.extra||'';$('#attrExtra').value=PROJ.extra;setName(d.name||'Importiertes Projekt');refreshEnv();if(d.view)map.setView(d.view.center,d.view.zoom,{animate:false});setMode(mode)}
+/* Autosave: letzter Stand im Browser (IndexedDB), geht bei Neuladen nicht verloren */
+const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('seekoje',1);r.onupgradeneeded=()=>r.result.createObjectStore('p');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+let autoT,autoOn=false;
+async function autoNow(){try{const s=JSON.stringify(projectData(true)),d=await idb();d.transaction('p','readwrite').objectStore('p').put(s,'last')}catch(e){}}
+function autosave(){if(!autoOn)return;clearTimeout(autoT);autoT=setTimeout(autoNow,1500)}
+addEventListener('visibilitychange',()=>{if(document.hidden&&autoOn&&autoT){clearTimeout(autoT);autoT=0;autoNow()}});addEventListener('pagehide',()=>{if(autoOn&&autoT){clearTimeout(autoT);autoT=0;autoNow()}});
+async function autoload(){try{const d=await idb();return await new Promise(ok=>{const r=d.transaction('p').objectStore('p').get('last');r.onsuccess=()=>ok(r.result||null);r.onerror=()=>ok(null)})}catch(e){return null}}
+function newProject(name,ll,bb){
+ all().forEach(drop);sel.clear();M.depth=[];M.g=null;M.acc=null;M.src={};$('#wl').value='';ENV.fc=null;ENV.box=null;WIND.d=null;windInfo();PROJ.extra='';$('#attrExtra').value='';
+ mp=[];ml.setLatLngs([]);$('#meas').textContent='Messen: Modus „Messen“ wählen';counter=0;hist=[];hi=-1;setName(name);mInfo();refreshEnv();
+ if(bb)map.fitBounds(bb,{maxZoom:16,animate:false});else map.setView(ll,15,{animate:false});
+ commit();setMode('pickwater');msg('Neues Projekt „'+PROJ.name+'“. Tippe auf die Wasserfläche, um das Gewässer zu übernehmen.')}
+const NP={pick:null};
+function npPick(c){NP.pick=c;$('#npSel').textContent='Ort: '+(c.label||c.name)+` (${(+c.lat).toFixed(4)}°N, ${(+c.lon).toFixed(4)}°E)`;if(!$('#npName').value.trim())$('#npName').value=c.name}
+async function npSearch(){const q=$('#npQ').value.trim(),box=$('#npRes');box.replaceChildren();if(!q)return;
+ const m=q.match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/)||q.match(/^(-?\d+,\d+)\s*[;\s]\s*(-?\d+,\d+)$/);
+ if(m){const a=parseFloat(m[1].replace(',','.')),b=parseFloat(m[2].replace(',','.'));if(Math.abs(a)<=90&&Math.abs(b)<=180){npPick({name:'',label:'Koordinaten',lat:a,lon:b});return}}
+ box.append(el('div',{className:'dim',textContent:'Suche …'}));
+ try{const r=await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=de&q='+encodeURIComponent(q));if(!r.ok)throw Error('HTTP '+r.status);
+  const d=await r.json();box.replaceChildren();if(!d.length){box.append(el('div',{className:'dim',textContent:'Nichts gefunden. Anderen Namen oder „Breite, Länge“ versuchen.'}));return}
+  d.forEach(x=>{const b=el('button',{type:'button',className:'v it'},(x.name||x.display_name.split(',')[0]),el('small',{},' · '+x.display_name.split(',').slice(1,4).join(',').trim()));
+   b.onclick=()=>{const bb=x.boundingbox&&x.boundingbox.map(parseFloat);npPick({name:x.name||x.display_name.split(',')[0],label:x.display_name.split(',').slice(0,3).join(','),lat:+x.lat,lon:+x.lon,bb:bb&&bb.every(isFinite)?[[bb[0],bb[2]],[bb[1],bb[3]]]:null})};box.append(b)});
+  box.append(el('div',{className:'dim',textContent:'Suche: © OpenStreetMap-Mitwirkende, Nominatim'}))}
+ catch(e){box.replaceChildren(el('div',{className:'dim',style:'color:var(--bad)',textContent:'Suche fehlgeschlagen: '+e.message}))}}
+function npOpen(){NP.pick=null;$('#npName').value='';$('#npQ').value='';$('#npRes').replaceChildren();$('#npSel').textContent='';
+ const has=all().length||ENV.fc||M.g||M.depth.length;$('#npSaveRow').hidden=!has;$('#npSave').checked=true;$('#newP').showModal();$('#npQ').focus()}
+$('#newTop').onclick=$('#newBtn').onclick=npOpen;$('#npCancel').onclick=()=>$('#newP').close();$('#npSearch').onclick=npSearch;
+$('#npQ').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();npSearch()}};
+$('#npView').onclick=()=>{const c=map.getCenter();npPick({name:'',label:'aktueller Kartenausschnitt',lat:c.lat,lon:c.lng,keepView:true})};
+$('#npOk').onclick=()=>{const c=NP.pick,nm=$('#npName').value.trim()||(c&&c.name)||'Neues Projekt';
+ if(!$('#npSaveRow').hidden&&$('#npSave').checked)saveP();
+ $('#newP').close();
+ if(!c||c.keepView){const m=map.getCenter();newProject(nm,m)}else newProject(nm,[c.lat,c.lon],c.bb)}
+function gpx(){const x=s=>String(s??'').replace(/[<>&"']/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]));
+ const fs=JSON.parse(ser()).features;let o='<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Seekarten-Editor Prototyp" xmlns="http://www.topografix.com/GPX/1/1">\n'+(attrLines().length?`<metadata><name>${x(PROJ.name)}</name>${attrLines().some(t=>/OpenStreetMap/.test(t))?'<copyright author="OpenStreetMap-Mitwirkende"><license>https://opendatacommons.org/licenses/odbl/1-0/</license></copyright>':''}<desc>${x(attrLines().join(" | "))}</desc></metadata>\n`:'');
+ fs.forEach(f=>{if(f.geometry.type==='Point'){const[c,a]=f.geometry.coordinates;o+=`<wpt lat="${a}" lon="${c}"><name>${x(f.properties.name)}</name><desc>${x(f.properties.notes)}</desc><type>${x(f.properties.type)}</type></wpt>\n`}});
+ const rte=(n,t,c)=>`<rte><name>${x(n)}</name><type>${x(t)}</type>`+c.map(q=>`<rtept lat="${q[1]}" lon="${q[0]}"/>`).join('')+'</rte>\n';
+ fs.forEach(f=>{const g=f.geometry,p=f.properties,nm=p.name||p.type;
+  if(g.type==='LineString')o+=rte(nm,p.type,g.coordinates);
+  else if(g.type==='MultiLineString')g.coordinates.forEach((c,i)=>o+=rte(nm+(g.coordinates.length>1?' '+(i+1):''),p.type,c));
+  else if(g.type==='Polygon')o+=rte(nm+' (Umriss)',p.type,g.coordinates[0]);
+  else if(g.type==='MultiPolygon')g.coordinates.forEach((pl,i)=>o+=rte(nm+' (Umriss '+(i+1)+')',p.type,pl[0]))});
+ return o+'</gpx>'}
+const fileIn=$('#file');let fileMode='';
+fileIn.onchange=async()=>{const f=fileIn.files[0];fileIn.value='';if(!f)return;
+ try{const txt=await f.text();let d;if(/^\s*</.test(txt))d=xmlToFC(txt,f.name);else try{d=JSON.parse(txt)}catch(_){throw Error('Datei ist weder GeoJSON noch GPX/KML')}
+  if(fileMode==='proj'){applyProject(d);hist=[];hi=-1}
+  else addFC(d);commit();msg('Import erfolgreich')}catch(e){msg('Import fehlgeschlagen: '+e.message,true)}};
+$('#saveP').onclick=saveP;$('#loadP').onclick=()=>{fileMode='proj';fileIn.accept='.json';fileIn.click()};
+$('#impG').onclick=()=>{fileMode='geo';fileIn.accept='';fileIn.click()};
+$('#expG').onclick=()=>{if(!all().length)return msg('Keine Objekte zum Exportieren.',true);dl(slug(PROJ.name)+'-objekte.geojson',JSON.stringify({...JSON.parse(ser()),attribution:attrLines(),license_note:'OpenStreetMap-Daten unter ODbL 1.0 – Namensnennung siehe attribution'}),'application/geo+json')};
+$('#expX').onclick=()=>{if(!all().length)return msg('Keine Objekte zum Exportieren.',true);dl(slug(PROJ.name)+'-objekte.gpx',gpx(),'application/gpx+xml')};
+$('#clear').onclick=()=>{if(all().length&&confirm('Alle eigenen Objekte entfernen? (Rückgängig möglich)')){all().forEach(drop);commit()}};
+$('#demo').onclick=()=>{const mc=map.getCenter(),c=[mc.lat,mc.lng],d=(o,a)=>[c[0]+o,c[1]+a],D={demo:true,estimated:true,source:'DEMO – frei erfunden, nicht real'};
+ const ln=(pts,p)=>adopt(L.polyline(pts),{...D,...p});
+ ln([d(.001,-.004),d(-.001,-.004)],{type:'startziel',name:'DEMO Startlinie'});
+ adopt(L.marker(d(.0015,-.004)),{...D,type:'boje',name:'DEMO Startboje'});adopt(L.marker(d(.0015,.003)),{...D,type:'boje',name:'DEMO Luvtonne'});
+ ln([d(0,-.004),d(.0015,.003),d(-.001,.0),d(0,-.004)],{type:'kurs',name:'DEMO Kurs'});commit();msg('Demo-Daten (fiktiv) hinzugefügt')};
+$('#src').innerHTML=`<b>OpenStreetMap</b> – ODbL, © OSM-Mitwirkende; Kacheln: <a href="https://operations.osmfoundation.org/policies/tiles/" target="_blank" rel="noopener">Tile Usage Policy</a> beachten. Aktualität: live bzw. Abrufdatum.<br>
+<b>OpenSeaMap</b> – Seezeichen-Overlay, © OSM-Mitwirkende (ODbL).<br>
+<b>GeoSN</b> (Luftbild/Gelände) – nur über CFG.geosn in index.html; Dienst, Lizenz und Stand vor Einbindung prüfen.<br>
+<b>LMBV-Tiefenkarte</b> (PDF, Stand 04/2018) – nicht eingebunden; nur visuelle Referenz, keine Tiefendaten.<br>
+Manuelle Objekte tragen <i>Quelle: manuell</i>. Fehlende Werte bleiben leer. Kein Navigationsgerät.`;
+
+/* ---------- Messdaten (Tiefen/Höhen) & Profile ---------- */
+const mpG=L.featureGroup().addTo(map),M={depth:[],g:null,acc:null,h:{get size(){return M.g?M.g.nx*M.g.ny:0},clear(){M.g=null;M.acc=null},set(){},has(){return false}},src:{}};
+function mInfo(){mpG.clearLayers();const st=Math.ceil(M.depth.length/4000)||1;
+ for(let i=0;i<M.depth.length;i+=st)L.circleMarker(inv([M.depth[i].x,M.depth[i].y]),{radius:3,color:'#5ec8e5',weight:1,fillOpacity:.8,interactive:false}).addTo(mpG);
+ $('#pinfo').textContent=`Tiefe: ${M.depth.length} Pkt.${M.src.depth?' ('+M.src.depth+')':''} · Höhe: ${M.g?M.g.nx+'×'+M.g.ny+' @ '+M.g.cs+' m':'–'}${M.src.height?' ('+M.src.height+')':''}`}
+function loadTable(text,kind,crs,fname){const lines=text.split(/\r?\n/).filter(x=>x.trim()&&!/^\s*#/.test(x));if(!lines.length)throw Error('Datei ist leer');
+ const first=lines[0],dl=first.includes(';')?';':first.includes('\t')?'\t':first.includes(',')?',':/\s+/,num=q=>parseFloat(String(q??'').trim().replace(',','.'));
+ let a=crs==='wgs'?1:0,b=crs==='wgs'?0:1,c=2;
+ if(isNaN(num(first.split(dl)[0]))){const h=lines.shift().split(dl).map(q=>q.trim().toLowerCase()),f=re=>h.findIndex(n=>re.test(n));
+  const la=f(/^(lat|breite)/),lo=f(/^(lon|lng|long|länge|laenge)/),ex=f(/^(e|x|east|rechts)/),ny=f(/^(n|y|north|hoch)/),va=f(/^(tiefe|depth|hoehe|höhe|height|z|wert|value)/);
+  if(crs==='wgs'&&la>=0&&lo>=0){a=lo;b=la}else if(crs==='utm'&&ex>=0&&ny>=0){a=ex;b=ny}if(va>=0)c=va}
+ const D=[],H=new Map();let bad=0;
+ for(const ln of lines){const t=ln.trim().split(dl);let x=num(t[a]),y=num(t[b]);const v=num(t[c]);if(isNaN(x)||isNaN(y)||isNaN(v)){bad++;continue}
+  if(crs==='wgs'){if(y<47||y>55||x<5||x>16){bad++;continue}[x,y]=proj4('EPSG:4326','EPSG:25833',[x,y])}
+  else{if(x>=3.3e7)x-=3.3e7;if(x<1e5||x>9e5||y<5e6||y>6.3e6){bad++;continue}}
+  if(kind==='depth'){D.push({x,y,v});if(D.length>100000)throw Error('Zu viele Tiefenpunkte (>100 000)')}
+  else{const k=Math.floor(x/10)+','+Math.floor(y/10);if(!H.has(k)){H.set(k,[x,y,v]);if(H.size>400000)throw Error('Zu viele Höhenpunkte (>400 000 Zellen à 10 m): Ausschnitt zuschneiden oder ausdünnen')}}}
+ const ok=kind==='depth'?D.length:H.size;if(!ok||bad>lines.length/2)throw Error('Kaum gültige Zeilen – Koordinatensystem und Spaltenfolge prüfen');
+ const stamp=fname+', '+new Date().toLocaleDateString('de');
+ if(kind==='depth'){M.depth.push(...D);M.src.depth=stamp}else{H.forEach((v,k)=>M.h.set(k,v));M.src.height=stamp}mInfo();return ok}
+function exportM(full){const big=M.depth.length>50000&&!full;if(big)msg('Sehr viele Tiefenpunkte wurden im Projekt nicht mitgespeichert',true);return{depth:big?[]:M.depth.map(q=>[q.x,q.y,q.v]),src:M.src,waterLevel:$('#wl').value}}
+function importM(o){M.depth=[];M.src={};if(o){(o.depth||[]).forEach(q=>M.depth.push({x:q[0],y:q[1],v:q[2]}));M.src=o.src||{};$('#wl').value=o.waterLevel||''}mInfo()}
+const pf=$('#pfile');$('#pload').onclick=()=>{pf.accept='';pf.multiple=$('#pkind').value==='height';pf.click()};
+pf.onchange=async()=>{const fs=[...pf.files];pf.value='';if(!fs.length)return;try{if($('#pkind').value==='height')msg(await loadHeights(fs,$('#pcrs').value));else msg(loadTable(await fs[0].text(),'depth',$('#pcrs').value,fs[0].name)+' Werte importiert')}catch(e){msg('Messdaten-Import fehlgeschlagen: '+e.message,true)}};
+$('#pclear').onclick=()=>{if(confirm('Alle Messdaten (Tiefen/Höhen) entfernen?')){M.depth=[];M.h.clear();M.src={};mInfo()}};
+function hAt(x,y){const g=M.g;if(!g)return null;const fx=(x-g.x0)/g.cs-.5,fy=(y-g.y0)/g.cs-.5,i=Math.floor(fx),j=Math.floor(fy);if(i<0||j<0||i>=g.nx-1||j>=g.ny-1)return null;
+ const a=g.z[j*g.nx+i],b=g.z[j*g.nx+i+1],c=g.z[(j+1)*g.nx+i],d=g.z[(j+1)*g.nx+i+1];if(a!==a||b!==b||c!==c||d!==d)return null;const u=fx-i,v=fy-j;return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v}
+function idw(arr,x,y,R,k){const c=[];for(const q of arr){const d=Math.hypot(q.x-x,q.y-y);if(d<=R)c.push([d,q.v])}if(!c.length)return null;
+ c.sort((u,w)=>u[0]-w[0]);const t=c.slice(0,k);if(t[0][0]<.5)return t[0][1];let s=0,w=0;t.forEach(([d,v])=>{s+=v/(d*d);w+=1/(d*d)});return s/w}
+const pip=(ll,r)=>{let c=false;for(let i=0,j=r.length-1;i<r.length;j=i++){const a=r[i],b=r[j];if((a.lat>ll.lat)!==(b.lat>ll.lat)&&ll.lng<(b.lng-a.lng)*(ll.lat-a.lat)/(b.lat-a.lat)+a.lng)c=!c}return c};
+function depthSrc(){const out=M.depth.slice();let skipped=0;
+ G.tiefenlinie.getLayers().forEach(l=>{const d=l.feature.properties.depth;if(d==null||d===''||!isFinite(+d)){skipped++;return}
+  rings(l.getLatLngs()).forEach(r=>{for(let i=1;i<r.length;i++){const a=fwd(r[i-1]),b=fwd(r[i]),n=Math.max(1,Math.ceil(Math.hypot(b[0]-a[0],b[1]-a[1])/10));for(let k=0;k<=n;k++)out.push({x:a[0]+(b[0]-a[0])*k/n,y:a[1]+(b[1]-a[1])*k/n,v:+d})}})});return{out,skipped}}
+function computeProfile(l){const P=rings(l.getLatLngs())[0].map(fwd),cum=[0];for(let i=1;i<P.length;i++)cum.push(cum[i-1]+Math.hypot(P[i][0]-P[i-1][0],P[i][1]-P[i-1][1]));
+ const Lt=cum[cum.length-1];if(!Lt)throw Error('Profil hat keine Länge');const n=Math.min(400,Math.max(20,Math.round(Lt/5))),{out,skipped}=depthSrc(),
+  water=[...G.gewaesser.getLayers(),...G.hafen.getLayers()].map(x=>rings(x.getLatLngs())[0]),rows=[];let s=1;
+ for(let i=0;i<=n;i++){const d=Lt*i/n;while(s<cum.length-1&&cum[s]<d)s++;const f=(d-cum[s-1])/((cum[s]-cum[s-1])||1),x=P[s-1][0]+(P[s][0]-P[s-1][0])*f,y=P[s-1][1]+(P[s][1]-P[s-1][1])*f,ll=inv([x,y]);
+  rows.push({d,lat:ll.lat,lng:ll.lng,h:M.h.size?hAt(x,y):null,t:out.length&&water.some(w=>pip(ll,w))?idw(out,x,y,250,6):null})}
+ return{rows,skipped,nd:out.length}}
+function chart(rows,key,title,col,inv2,hl){const W=680,H=150,m={l:48,r:10,t:16,b:22},v=rows.filter(r=>r[key]!=null).map(r=>r[key]);
+ if(!v.length)return `<div class="lh">${title}</div><div class="dim">Keine Daten entlang des Profils.</div>`;
+ let lo=Math.min(...v),hi=Math.max(...v);if(hl!=null){lo=Math.min(lo,hl);hi=Math.max(hi,hl)}if(hi-lo<1){lo-=.5;hi+=.5}
+ const Ld=rows[rows.length-1].d||1,X=d=>m.l+(W-m.l-m.r)*d/Ld,Y=q=>{const f=(q-lo)/(hi-lo);return m.t+(H-m.t-m.b)*(inv2?f:1-f)};
+ let p='',pen=0;rows.forEach(r=>{if(r[key]==null){pen=0;return}p+=(pen?'L':'M')+X(r.d).toFixed(1)+' '+Y(r[key]).toFixed(1);pen=1});
+ const wl=hl!=null?`<line x1="${m.l}" x2="${W-m.r}" y1="${Y(hl)}" y2="${Y(hl)}" stroke="#5fb4ff" stroke-dasharray="5 4"/><text x="${W-m.r-2}" y="${Y(hl)-3}" text-anchor="end">Wasserspiegel</text>`:'';
+ return `<div class="lh">${title}</div><svg viewBox="0 0 ${W} ${H}" role="img"><rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}" fill="none" stroke="rgba(160,200,215,.25)"/>${wl}<path d="${p}" fill="none" stroke="${col}" stroke-width="2"/><text x="${m.l-4}" y="${m.t+8}" text-anchor="end">${hi.toFixed(1)}</text><text x="${m.l-4}" y="${H-m.b}" text-anchor="end">${lo.toFixed(1)}</text><text x="${m.l}" y="${H-6}">0 m</text><text x="${W-m.r}" y="${H-6}" text-anchor="end">${fmt(Ld)}</text></svg>`}
+let lastProf=null;
+function showProfile(l){try{const r=computeProfile(l),wl=parseFloat($('#wl').value);lastProf=r.rows;
+ $('#ptitle').textContent='Profil: '+(l.feature.properties.name||'ohne Namen')+' · '+fmt(r.rows[r.rows.length-1].d);
+ $('#pbody').innerHTML=chart(r.rows,'h','Höhe (m ü. NHN)','#7fd49b',false,isFinite(wl)?wl:null)+chart(r.rows,'t','Tiefe unter Wasserlinie (m)','#5ec8e5',true,null);
+ const n=[];n.push(M.h.size?`Höhe: ${M.src.height||'importiert'}, bilinear aus dem Höhenraster interpoliert.`:'Keine Höhendaten geladen (Messdaten → Art „Höhe“).');
+ n.push(r.nd?`Tiefe: aus Tiefenlinien/Lotungen interpoliert (${M.src.depth||'manuell nachgezeichnet'}), geschätzt, nur innerhalb Gewässer-/Hafenflächen und max. 250 m Abstand zu Daten.`:'Keine Tiefendaten (Tiefenlinien mit Tiefe zeichnen oder Lotungen laden).');
+ if(r.skipped)n.push(`${r.skipped} Tiefenlinie(n) ohne Tiefenwert wurden ignoriert.`);if(isNaN(wl))n.push('Wasserspiegel unbekannt: Höhe und Tiefe getrennt dargestellt.');
+ n.push('Kein Navigationsprodukt.');$('#pnote').textContent=n.join(' ');$('#prof').hidden=false}catch(e){msg('Profil nicht möglich: '+e.message,true)}}
+$('#pclose').onclick=()=>$('#prof').hidden=true;
+$('#pcsv').onclick=()=>{if(!lastProf)return;const f=v=>v==null?'':v.toFixed(2);dl('profil.csv','dist_m,lat,lng,hoehe_m_NHN,tiefe_m_geschaetzt\n'+lastProf.map(r=>[r.d.toFixed(1),r.lat.toFixed(6),r.lng.toFixed(6),f(r.h),f(r.t)].join(',')).join('\n'),'text/csv')};
+
+/* ---------- Gewässer aus OSM übernehmen (Klick auf Wasserfläche → Uferlinie entlang Wasser/Land) ---------- */
+const eqp=(a,b)=>a[0]===b[0]&&a[1]===b[1];
+function assemble(segs){const out=[];let pool=segs.map(q=>q.slice()),bad=0;
+ while(pool.length){let cur=pool.pop(),g=0;
+  while(!eqp(cur[0],cur[cur.length-1])&&g++<20000){let f=false;
+   for(let i=0;i<pool.length;i++){const q=pool[i],e=cur[cur.length-1];
+    if(eqp(q[0],e)){cur=cur.concat(q.slice(1))}else if(eqp(q[q.length-1],e)){cur=cur.concat(q.slice().reverse().slice(1))}
+    else if(eqp(q[q.length-1],cur[0])){cur=q.concat(cur.slice(1))}else if(eqp(q[0],cur[0])){cur=q.slice().reverse().concat(cur.slice(1))}else continue;
+    pool.splice(i,1);f=true;break}
+   if(!f)break}
+  if(cur.length>3&&eqp(cur[0],cur[cur.length-1]))out.push(cur.slice(0,-1).map(q=>L.latLng(q[0],q[1])));else bad++}
+ return{rings:out,bad}}
+function buildWater(e){const pr=g=>g.map(q=>[q.lat,q.lon]);let outers=[],inners=[],bad=0;
+ if(e.type==='way'&&e.geometry){const r=assemble([pr(e.geometry)]);outers=r.rings;bad=r.bad}
+ else if(e.type==='relation'&&e.members){const o=[],i=[];e.members.forEach(m=>{if(m.type==='way'&&m.geometry)(m.role==='inner'?i:o).push(pr(m.geometry))});
+  const ro=assemble(o),ri=assemble(i);outers=ro.rings;inners=ri.rings;bad=ro.bad+ri.bad}
+ if(!outers.length)return null;
+ const ar=r=>area(r),m2=outers.reduce((s,r)=>s+ar(r),0)-inners.reduce((s,r)=>s+ar(r),0);
+ return{id:e.type+'/'+e.id,tags:e.tags||{},outers,inners,m2,bad}}
+let busyW=false;
+async function pickWater(ll){if(busyW)return;busyW=true;let prev=null;
+ try{msg('Suche Gewässer …');
+  const q=`[out:json][timeout:25];is_in(${ll.lat},${ll.lng})->.a;(way(pivot.a)["natural"="water"];relation(pivot.a)["natural"="water"];way(pivot.a)["landuse"="reservoir"];relation(pivot.a)["landuse"="reservoir"];);out geom;`;
+  const d=await ovp(q);
+  const c=(d.elements||[]).map(buildWater).filter(g=>g&&g.outers.some(o=>pip(ll,o))&&!g.inners.some(i=>pip(ll,i))).sort((a,b)=>a.m2-b.m2)[0];
+  if(!c)return msg('Hier ist in OSM keine Wasserfläche erfasst. Auf Wasser tippen oder Ufer selbst zeichnen.',true);
+  const groups=c.outers.map(o=>({o,h:[]}));c.inners.forEach(i=>{(groups.find(g=>pip(i[0],g.o))||groups[0]).h.push(i)});
+  const arr=groups.map(g=>[g.o,...g.h]),lls=arr.length===1?arr[0]:arr;
+  prev=L.polygon(lls,{color:'#ffd23f',weight:3,dashArray:'6 4',fillOpacity:.1,interactive:false}).addTo(map);
+  await new Promise(x=>setTimeout(x,80));
+  const nm=c.tags.name||'Gewässer ('+c.id+')',pts=c.outers.reduce((s,o)=>s+o.length,0);
+  if(!confirm(`Gefunden: „${nm}“\nFläche ${(c.m2/1e4).toFixed(1)} ha · ${c.inners.length} Insel(n)/Loch · ${pts} Uferpunkte · OSM ${c.id}\n\nAls Gewässer übernehmen und entlang der Uferlinie (Wasser → Land) automatisch umranden?`))return;
+  const day=new Date().toLocaleDateString('de'),notes=[`OSM ${c.id} · abgerufen ${day}`,`Fläche ${Math.round(c.m2).toLocaleString('de')} m², ${c.inners.length} Insel(n)/Loch`,...(c.bad?[`Hinweis: ${c.bad} unvollständige Randstück(e) ignoriert`]:[]),...Object.entries(c.tags).slice(0,15).map(([k,v])=>k+'='+v)].join('\n');
+  const l=adopt(L.polygon(lls),{type:'gewaesser',name:nm,estimated:false,source:'OpenStreetMap-Mitwirkende (ODbL), via Overpass, '+day,notes,osm:{id:c.id,tags:c.tags}});
+  const ph=all().filter(x=>x.feature.properties.type==='gewaesser'&&x!==l&&/Näherung/.test(x.feature.properties.source||''));
+  if(ph.length&&confirm('Die geschätzte Platzhalter-Ellipse jetzt entfernen?'))ph.forEach(drop);
+  const ele=parseFloat(c.tags.ele);if(isFinite(ele)&&!$('#wl').value&&confirm(`OSM nennt für „${nm}“ eine Höhe von ${ele} m (Tag „ele“, nicht geprüft).\nAls Wasserspiegel (m ü. NHN) für Profile übernehmen?`))$('#wl').value=ele;
+  commit();setMode('select');pick(l);map.fitBounds(l.getBounds().pad(.15));msg('Gewässer übernommen, Uferlinie wird automatisch geführt')}
+ catch(e){msg('Gewässersuche fehlgeschlagen: '+e.message,true)}
+ finally{if(prev)map.removeLayer(prev);busyW=false}}
+
+/* ---------- Tonnen: Formen, Farben, Import von Seezeichen ---------- */
+const SH={can:'<rect x="7" y="5" width="10" height="15" rx="2"/>',conical:'<path d="M12 3 19.5 20.5h-15z"/>',spherical:'<circle cx="12" cy="12" r="8"/>',pillar:'<path d="M9.5 4h5l1 16h-7z"/>',spar:'<rect x="10.5" y="2" width="3" height="20" rx="1"/>',barrel:'<ellipse cx="12" cy="12" rx="6.5" ry="8.5"/>',diamond:'<path d="M12 3 21 12 12 21 3 12z"/>',square:'<rect x="5" y="5" width="14" height="14"/>'};
+const SHAPES=[['can','Tonne (stumpf)'],['conical','Spitztonne'],['spherical','Kugeltonne'],['pillar','Säulentonne'],['spar','Spierentonne'],['barrel','Fasstonne'],['diamond','Raute'],['square','Quadrat']];
+const COLS=[['Rot','#e53935'],['Grün','#43a047'],['Gelb','#fdd835'],['Weiß','#f5f5f5'],['Schwarz','#212121'],['Blau','#1e88e5'],['Orange','#fb8c00']];
+function shapeSVG(sh,c,sel,z){return `<svg class="bs${sel?' sel':''}" viewBox="0 0 24 24" width="${z}" height="${z}"><g fill="${c}" stroke="#0c1820" stroke-width="1.5" stroke-linejoin="round">${SH[sh]||SH.spherical}</g></svg>`}
+const COLN={red:'#e53935',green:'#43a047',yellow:'#fdd835',white:'#f5f5f5',black:'#212121',blue:'#1e88e5',orange:'#fb8c00',grey:'#9e9e9e',amber:'#ffb300',violet:'#8e24aa',magenta:'#d81b60'};
+const SEAN={buoy_lateral:'Fahrwassertonne',buoy_cardinal:'Kardinaltonne',buoy_special_purpose:'Sondertonne',buoy_safe_water:'Mitte-Fahrwasser-Tonne',buoy_isolated_danger:'Einzelgefahrentonne',buoy_installation:'Anlagentonne',beacon_lateral:'Seitenbake',beacon_cardinal:'Kardinalbake',beacon_special_purpose:'Sonderbake',beacon_safe_water:'Bake',beacon_isolated_danger:'Einzelgefahrenbake'};
+const SHM={can:'can',conical:'conical',spherical:'spherical',pillar:'pillar',spar:'spar',barrel:'barrel','super-buoy':'can',stake:'spar',pole:'spar',tower:'pillar',cairn:'pillar'};
+async function seaImport(){if(map.getZoom()<13)return msg('Bitte näher heranzoomen (ab Zoom 13).',true);
+ const b=map.getBounds(),bb=[b.getSouth(),b.getWest(),b.getNorth(),b.getEast()].join(',');msg('Lade Seezeichen …');
+ try{const d=await ovp(`[out:json][timeout:25];node["seamark:type"~"^(buoy|beacon)_"](${bb});out;`),els=d.elements||[];
+  const have=new Set(all().map(l=>l.feature.properties.osm&&l.feature.properties.osm.id).filter(Boolean)),nn=els.filter(e=>e.type==='node'&&!have.has('node/'+e.id));
+  if(!nn.length)return msg(els.length?'Alle gefundenen Seezeichen sind schon übernommen.':'Keine Seezeichen im Ausschnitt gefunden.',true);
+  if(!confirm(`${nn.length} Seezeichen (Tonnen/Baken) aus OpenStreetMap/OpenSeaMap im Ausschnitt gefunden.\nAls Tonnen-Objekte übernehmen? Form und Farbe kannst du danach je Tonne ändern.`))return;
+  const day=new Date().toLocaleDateString('de');
+  nn.forEach(e=>{const t=e.tags||{},ty=t['seamark:type'],ks=Object.keys(t),ck=ks.find(k=>/^seamark:[^:]+:colour$/.test(k)),sk=ks.find(k=>/^seamark:[^:]+:shape$/.test(k)),cols=ck?t[ck].split(';'):[];
+   const pr={type:'boje',name:t['seamark:name']||t.name||SEAN[ty]||ty,shape:SHM[sk&&t[sk]]||(ty.startsWith('beacon')?'spar':'spherical'),estimated:false,
+    source:'OpenStreetMap/OpenSeaMap (ODbL), Overpass, '+day,notes:Object.entries(t).slice(0,20).map(([k,v])=>k+'='+v).join('\n'),osm:{id:'node/'+e.id,tags:t}};
+   if(COLN[cols[0]])pr.color=COLN[cols[0]];adopt(L.marker([e.lat,e.lon]),pr)});
+  commit();msg(nn.length+' Seezeichen übernommen. Tipp: Ebene „Seezeichen (OpenSeaMap)“ ausblenden, um Doppelungen zu vermeiden.')}
+ catch(e){msg('Seezeichen-Import fehlgeschlagen: '+e.message,true)}}
+$('#seaImp').onclick=seaImport;
+
+/* ---------- GPX/KML-Import (wird in GeoJSON umgewandelt) ---------- */
+function xmlToFC(txt,name){const x=new DOMParser().parseFromString(txt,'application/xml');if(x.getElementsByTagName('parsererror').length)throw Error('XML nicht lesbar');
+ const root=x.documentElement.localName.toLowerCase(),F=[],src='Import: '+name,tag=(n,t)=>[...n.getElementsByTagNameNS('*',t)];
+ const val=(n,t)=>{const e=[...n.children].find(c=>c.localName===t);return e?e.textContent.trim():''};
+ const ty=(n,g,def)=>{const t=val(n,'type');return T[t]&&(T[t].g===g||T[t].g==='Any')?t:def};
+ const add=(geom,pr)=>F.push({type:'Feature',properties:{source:src,...pr},geometry:geom});
+ if(root==='gpx'){
+  tag(x,'wpt').forEach(n=>{const c=[parseFloat(n.getAttribute('lon')),parseFloat(n.getAttribute('lat'))];if(c.every(isFinite))add({type:'Point',coordinates:c},{type:ty(n,'Point','wegpunkt'),name:val(n,'name'),notes:val(n,'desc')||val(n,'cmt')})});
+  tag(x,'rte').forEach(n=>{const c=tag(n,'rtept').map(p=>[parseFloat(p.getAttribute('lon')),parseFloat(p.getAttribute('lat'))]).filter(q=>q.every(isFinite));if(c.length>1)add({type:'LineString',coordinates:c},{type:ty(n,'Line','kurs'),name:val(n,'name'),notes:val(n,'desc')})});
+  tag(x,'trk').forEach(n=>tag(n,'trkseg').forEach(sg=>{const c=tag(sg,'trkpt').map(p=>[parseFloat(p.getAttribute('lon')),parseFloat(p.getAttribute('lat'))]).filter(q=>q.every(isFinite));if(c.length>1)add({type:'LineString',coordinates:c},{type:'kurs',name:val(n,'name'),notes:'GPX-Track'})}))}
+ else if(root==='kml'){const co=n=>{const e=tag(n,'coordinates')[0];return e?e.textContent.trim().split(/\s+/).map(q=>q.split(',').slice(0,2).map(Number)).filter(q=>q.length===2&&q.every(isFinite)):[]};
+  tag(x,'Placemark').forEach(n=>{const nm=val(n,'name'),ds=val(n,'description'),pt=tag(n,'Point')[0],ln=tag(n,'LineString')[0],pg=tag(n,'Polygon')[0];
+   if(pt){const c=co(pt)[0];if(c)add({type:'Point',coordinates:c},{type:'wegpunkt',name:nm,notes:ds})}
+   else if(ln){const c=co(ln);if(c.length>1)add({type:'LineString',coordinates:c},{type:'kurs',name:nm,notes:ds})}
+   else if(pg){const ob=tag(pg,'outerBoundaryIs')[0]||pg,c=co(ob);if(c.length>3)add({type:'Polygon',coordinates:[c]},{type:'sonstig',name:nm,notes:ds})}})}
+ else throw Error('XML-Format „'+root+'“ nicht unterstützt (erwartet GPX oder KML)');
+ if(root==='kml')tag(x,'Track').forEach(tr=>{const c=tag(tr,'coord').map(q=>q.textContent.trim().split(/\s+/).slice(0,2).map(Number)).filter(q=>q.length===2&&q.every(isFinite));if(c.length>1)add({type:'LineString',coordinates:c},{type:'kurs',name:'KML-Track',notes:''})});
+ if(!F.length){const names=[...new Set([...x.getElementsByTagName('*')].map(e=>e.localName))].slice(0,10).join(', ');throw Error(`${root.toUpperCase()}-Datei lesbar, aber ohne Punkte/Linien/Flächen. Enthaltene Elemente: ${names}`)}
+ return{type:'FeatureCollection',features:F}}
+
+/* ---------- Umgebung (OSM, 1 km) & Höhenraster für den Spiele-Export ---------- */
+const ENV={fc:null,box:null},RAD=1000,hG=L.layerGroup().addTo(map),cvR=L.canvas({padding:.5});
+const CLC={forest:'#2e6b3a',scrub:'#4f7f3a',grass:'#6fae5a',farmland:'#b9b16a',wetland:'#4f8f86',beach:'#e0cf8a',urban:'#8a8a94',tree:'#2e7d32',other:'#6b7f6b'},CATC={water:'water',waterway:'water',building:'build',road:'path',path:'path',rail:'path',harbor:'harbor'};
+const clsOf=t=>t.building?'building':t.highway?(/^(footway|path|track|cycleway|bridleway|steps|pedestrian)$/.test(t.highway)?'path':'road'):t.railway?'rail':
+ t.natural==='water'||t.landuse==='reservoir'||t.landuse==='basin'?'water':t.waterway?'waterway':
+ t.natural==='wood'||t.landuse==='forest'?'forest':/^(scrub|heath)$/.test(t.natural)?'scrub':t.natural==='wetland'?'wetland':/^(beach|sand)$/.test(t.natural)?'beach':t.natural==='tree'?'tree':
+ /^(farmland|farmyard|orchard|vineyard|meadow)$/.test(t.landuse)?'farmland':(/^(grass|village_green|recreation_ground)$/.test(t.landuse)||t.natural==='grassland'||/^(park|garden|pitch|playground|golf_course)$/.test(t.leisure))?'grass':
+ /^(residential|commercial|industrial|retail|construction)$/.test(t.landuse)?'urban':(/^(pier|breakwater|groyne)$/.test(t.man_made)||/^(marina|slipway)$/.test(t.leisure))?'harbor':'other';
+function envBox(){const ps=G.gewaesser.getLayers();let b=null;const add=ll=>{const p=fwd(ll);b=b?[Math.min(b[0],p[0]),Math.min(b[1],p[1]),Math.max(b[2],p[0]),Math.max(b[3],p[1])]:[p[0],p[1],p[0],p[1]]};
+ if(ps.length)ps.forEach(l=>rings(l.getLatLngs()).forEach(r=>r.forEach(add)));else{const m=map.getBounds();[m.getSouthWest(),m.getNorthEast(),m.getNorthWest(),m.getSouthEast()].forEach(add)}
+ const R=ps.length?RAD:0;return[b[0]-R,b[1]-R,b[2]+R,b[3]+R].map(Math.round)}
+function drawEnv(){for(const k in osmG)osmG[k].clearLayers();if(!ENV.fc)return;
+ ENV.fc.features.forEach(f=>{const cls=f.properties.cls,c=CATC[cls]||'land',o=OSMC[c],col=CLC[cls]||o[1];
+  L.geoJSON(f.geometry,{interactive:false,pmIgnore:true,renderer:cvR,pointToLayer:(q,ll)=>L.circleMarker(ll,{radius:3,color:col,weight:1,interactive:false,renderer:cvR}),style:{color:col,weight:c==='path'?1.5:1,dashArray:c==='path'?'4 3':null,fillColor:col,fillOpacity:o[2],renderer:cvR}}).addTo(osmG[c])})}
+function envInfo(){const e=ENV.fc,g=M.g;$('#einfo').textContent=(e?`Umgebung: ${e.features.length} Objekte, ${((ENV.box[2]-ENV.box[0])*(ENV.box[3]-ENV.box[1])/1e6).toFixed(1)} km², Stand ${new Date(e.meta.fetched).toLocaleDateString('de')}`:'Umgebung: nicht geladen')+' · '+(g?`Höhenraster ${g.nx}×${g.ny} @ ${g.cs} m (${M.src.height||'?'})`:'Höhenraster: nicht geladen')}
+function refreshEnv(){drawEnv();drawGrid();envInfo();autosave()}
+function polyGeom(c){const gr=c.outers.map(o=>({o,h:[]}));c.inners.forEach(i=>(gr.find(g=>pip(i[0],g.o))||gr[0]).h.push(i));
+ const co=gr.map(g=>[g.o,...g.h].map(r=>r.concat([r[0]]).map(p=>[p.lng,p.lat])));return co.length===1?{type:'Polygon',coordinates:co[0]}:{type:'MultiPolygon',coordinates:co}}
+async function envLoad(lake){let box;
+ if(lake){if(!G.gewaesser.getLayers().length)return msg('Erst einen See übernehmen („💧 See wählen“).',true);box=envBox()}
+ else{if(map.getZoom()<14)return msg('Bitte weiter hineinzoomen (ab Zoom 14).',true);const m=map.getBounds(),a=fwd(m.getSouthWest()),b=fwd(m.getNorthEast());box=[a[0],a[1],b[0],b[1]].map(Math.round)}
+ const cs=[inv([box[0],box[1]]),inv([box[2],box[3]]),inv([box[2],box[1]]),inv([box[0],box[3]])],km2=(box[2]-box[0])*(box[3]-box[1])/1e6;
+ const bb=[Math.min(...cs.map(q=>q.lat)),Math.min(...cs.map(q=>q.lng)),Math.max(...cs.map(q=>q.lat)),Math.max(...cs.map(q=>q.lng))].map(v=>v.toFixed(6)).join(',');
+ if(km2>40)return msg(`Gebiet zu groß (${km2.toFixed(0)} km², max. 40 km²).`,true);
+ if(!confirm(`Umgebung ${lake?'(1 km Rand um den See)':'(Kartenausschnitt)'} aus OpenStreetMap laden?\nca. ${km2.toFixed(1)} km², das kann einige Sekunden dauern.${ENV.fc?'\nDie bisher geladene Umgebung wird ersetzt.':''}`))return;
+ msg('Lade Umgebung …');
+ const q=`[out:json][timeout:90];(way["natural"](${bb});way["landuse"](${bb});way["leisure"](${bb});way["building"](${bb});way["highway"](${bb});way["railway"](${bb});way["waterway"](${bb});way["man_made"~"pier|breakwater|groyne"](${bb});relation["natural"~"water|wood|wetland|beach|scrub"](${bb});relation["landuse"](${bb});relation["leisure"](${bb});node["natural"="tree"](${bb}););out geom;`;
+ try{const d=await ovp(q),F=[];
+  for(const e of d.elements||[]){const t=e.tags||{},cls=clsOf(t);let g=null;
+   if(e.type==='node')g={type:'Point',coordinates:[e.lon,e.lat]};
+   else if(e.type==='way'&&e.geometry&&e.geometry.length>1){const c=e.geometry.map(p=>[p.lon,p.lat]),cl=c.length>3&&c[0][0]===c[c.length-1][0]&&c[0][1]===c[c.length-1][1];
+    g=cl&&!/^(road|path|rail|waterway)$/.test(cls)?{type:'Polygon',coordinates:[c]}:{type:'LineString',coordinates:c}}
+   else if(e.type==='relation'){const w=buildWater(e);if(w)g=polyGeom(w)}
+   if(g)F.push({type:'Feature',properties:{cls,osm:e.type+'/'+e.id,...(t.name?{name:t.name}:{}),tags:t},geometry:g})}
+  if(!F.length)return msg('Keine OSM-Objekte im Gebiet gefunden.',true);
+  ENV.fc={type:'FeatureCollection',meta:{source:'OpenStreetMap-Mitwirkende (ODbL), via Overpass',license:'ODbL 1.0',fetched:new Date().toISOString(),crs:'EPSG:4326',radius_m:lake?RAD:0,count:F.length},features:F};ENV.box=box;
+  refreshEnv();const cn={};F.forEach(f=>cn[f.properties.cls]=(cn[f.properties.cls]||0)+1);msg(`${F.length} Objekte geladen: `+Object.entries(cn).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([k,v])=>k+' '+v).join(', '))}
+ catch(e){msg('Umgebung laden fehlgeschlagen: '+e.message,true)}}
+$('#envLoad').onclick=()=>envLoad(true);
+function exportE(){return ENV.fc?{type:'FeatureCollection',meta:ENV.fc.meta,box:ENV.box,features:ENV.fc.features}:null}
+function importE(o){ENV.fc=o&&o.features?{type:'FeatureCollection',meta:o.meta||{fetched:new Date().toISOString()},features:o.features}:null;ENV.box=o?o.box:null}
+/* Höhenraster (UTM33-Raster, Float32; Speicherung als Uint16 in 5-cm-Stufen) */
+function newGrid(box,cs){const x0=Math.floor(box[0]/cs)*cs,y0=Math.floor(box[1]/cs)*cs,nx=Math.ceil((box[2]-x0)/cs),ny=Math.ceil((box[3]-y0)/cs);return{x0,y0,cs,nx,ny,z:new Float32Array(nx*ny).fill(NaN)}}
+async function eachLine(f,cb,prog){if(f.stream){const rd=f.stream().getReader(),td=new TextDecoder();let rest='',done=0;
+  for(;;){const{done:dn,value}=await rd.read();if(dn)break;done+=value.length;const ls=(rest+td.decode(value,{stream:true})).split('\n');rest=ls.pop();for(const l of ls)cb(l);if(prog)prog(done/f.size)}if(rest)cb(rest)}
+ else(await f.text()).split(/\r?\n/).forEach(cb)}
+async function loadHeights(files,crs){let cs=+$('#hcs').value||5;const box=ENV.box||envBox();
+ if(!M.g||M.g.cs!==cs){if(M.g&&!confirm(`Vorhandenes Höhenraster (${M.g.cs} m) durch neues Raster (${cs} m) ersetzen?`))return'Abgebrochen';
+  while((box[2]-box[0])/cs*((box[3]-box[1])/cs)>4e6)cs*=2;M.g=newGrid(box,cs);M.acc=null}
+ const g=M.g,n0=g.nx*g.ny;if(!M.acc){M.acc={s:new Float32Array(n0),c:new Uint16Array(n0)};for(let i=0;i<n0;i++)if(g.z[i]===g.z[i]){M.acc.s[i]=g.z[i];M.acc.c[i]=1}}
+ const S=M.acc.s,C=M.acc.c;let used=0,bad=0;
+ for(const f of files){let n=0;await eachLine(f,ln=>{ln=ln.trim();if(!ln||ln[0]==='#')return;const t=(ln.includes(';')?ln.replace(/,/g,'.'):ln).split(/[\s;,]+/),a=parseFloat(t[0]),b=parseFloat(t[1]),z=parseFloat(t[2]);
+   if(isNaN(a)||isNaN(b)||isNaN(z)){if(used+n>0)bad++;return}let x,y;
+   if(crs==='wgs'){if(a<47||a>55||b<5||b>16){bad++;return}[x,y]=proj4('EPSG:4326','EPSG:25833',[b,a])}else{x=a>=3.3e7?a-3.3e7:a;y=b;if(x<1e5||x>9e5||y<5e6||y>6.3e6){bad++;return}}
+   const i=Math.floor((x-g.x0)/g.cs),j=Math.floor((y-g.y0)/g.cs);if(i<0||j<0||i>=g.nx||j>=g.ny)return;const k=j*g.nx+i;S[k]+=z;C[k]++;n++},p=>msg(`${f.name}: ${(p*100).toFixed(0)} % …`));used+=n}
+ if(!used)throw Error('Keine Höhenpunkte im Gebiet gefunden – Koordinatensystem (UTM33/WGS84) und Lage prüfen');
+ for(let i=0;i<n0;i++)g.z[i]=C[i]?S[i]/C[i]:NaN;
+ M.src.height=files.map(f=>f.name).join(', ').slice(0,80)+', '+new Date().toLocaleDateString('de');mInfo();refreshEnv();
+ let miss=0;for(let i=0;i<n0;i++)if(g.z[i]!==g.z[i])miss++;
+ return `${used} Höhenpunkte im ${g.cs}-m-Raster${miss?` · ${(miss/n0*100).toFixed(0)} % Zellen ohne Daten (weitere Kacheln laden?)`:''}${bad?` · ${bad} ungültige Zeilen`:''}`}
+async function loadCoarse(){const box=ENV.box||envBox(),cs=90;if(M.g&&!confirm('Vorhandenes Höhenraster durch grobes 90-m-Raster ersetzen?'))return;
+ const g=newGrid(box,cs),n=g.nx*g.ny;if(n>6000)return msg('Gebiet zu groß für den Online-Abruf (max. 6000 Punkte).',true);
+ if(!confirm(`${n} Höhenpunkte (90-m-Raster) von Open-Meteo abrufen?\nQuelle: Copernicus DEM GLO-90 (Oberflächenmodell, grob, nur Vorschau). Kostenlos nur für nicht-kommerzielle Nutzung; Namensnennung Copernicus + Open-Meteo nötig.`))return;
+ const lat=[],lon=[];for(let j=0;j<g.ny;j++)for(let i=0;i<g.nx;i++){const p=inv([g.x0+(i+.5)*cs,g.y0+(j+.5)*cs]);lat.push(p.lat.toFixed(5));lon.push(p.lng.toFixed(5))}
+ try{for(let k=0;k<n;k+=100){msg(`Höhen laden ${Math.min(k+100,n)}/${n} …`);const r=await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat.slice(k,k+100).join(',')}&longitude=${lon.slice(k,k+100).join(',')}`);
+   if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json();(d.elevation||[]).forEach((z,q)=>{g.z[k+q]=z==null?NaN:z});await new Promise(x=>setTimeout(x,250))}
+  M.g=g;M.acc=null;M.src.height='Copernicus DEM GLO-90 via Open-Meteo (CC BY 4.0), '+new Date().toLocaleDateString('de')+' – grob';mInfo();refreshEnv();msg('Grobes Höhenraster geladen (nur Vorschau). Für Ufergestaltung DGM1 nutzen.')}
+ catch(e){msg('Höhenabruf fehlgeschlagen: '+e.message,true)}}
+$('#hCoarse').onclick=loadCoarse;
+function b64(u8){let s='';for(let i=0;i<u8.length;i+=0x8000)s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000));return btoa(s)}
+function exportG(){const g=M.g;if(!g)return null;const u=new Uint16Array(g.nx*g.ny);for(let i=0;i<u.length;i++){const z=g.z[i];u[i]=z===z?Math.max(1,Math.min(65535,Math.round((z+100)*20)+1)):0}
+ return{x0:g.x0,y0:g.y0,cs:g.cs,nx:g.nx,ny:g.ny,crs:'EPSG:25833',enc:'uint16 little-endian: (z+100)*20+1, 0=keine Daten, Zeilen von Süd nach Nord',data:b64(new Uint8Array(u.buffer)),src:M.src.height||''}}
+function importG(o){M.g=null;M.acc=null;if(!o||!o.data)return;const bin=atob(o.data),u8=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+ const u=new Uint16Array(u8.buffer),z=new Float32Array(u.length);for(let i=0;i<u.length;i++)z[i]=u[i]?(u[i]-1)/20-100:NaN;M.g={x0:o.x0,y0:o.y0,cs:o.cs,nx:o.nx,ny:o.ny,z};if(o.src)M.src.height=o.src}
+function drawGrid(){hG.clearLayers();const g=M.g;if(!g)return;let mn=1e9,mx=-1e9;for(const v of g.z)if(v===v){if(v<mn)mn=v;if(v>mx)mx=v}if(mn>mx)return;
+ const cn=[[g.x0,g.y0],[g.x0+g.nx*g.cs,g.y0],[g.x0,g.y0+g.ny*g.cs],[g.x0+g.nx*g.cs,g.y0+g.ny*g.cs]].map(inv),la0=Math.min(...cn.map(q=>q.lat)),la1=Math.max(...cn.map(q=>q.lat)),lo0=Math.min(...cn.map(q=>q.lng)),lo1=Math.max(...cn.map(q=>q.lng));
+ const P=[[lo0,la0],[lo1,la0],[lo0,la1],[lo1,la1]].map(q=>fwd(L.latLng(q[1],q[0]))),W=Math.min(g.nx,1200),H=Math.min(g.ny,1200),cv=document.createElement('canvas');cv.width=W;cv.height=H;
+ const cx=cv.getContext('2d'),im=cx.createImageData(W,H),Z=(i,j)=>g.z[Math.max(0,Math.min(g.ny-1,j))*g.nx+Math.max(0,Math.min(g.nx-1,i))];
+ for(let v=0;v<H;v++)for(let u=0;u<W;u++){const s=(u+.5)/W,t=1-(v+.5)/H,x=(1-t)*((1-s)*P[0][0]+s*P[1][0])+t*((1-s)*P[2][0]+s*P[3][0]),y=(1-t)*((1-s)*P[0][1]+s*P[1][1])+t*((1-s)*P[2][1]+s*P[3][1]),i=Math.floor((x-g.x0)/g.cs),j=Math.floor((y-g.y0)/g.cs);
+  if(i<0||j<0||i>=g.nx||j>=g.ny)continue;const z=g.z[j*g.nx+i];if(z!==z)continue;const o=(v*W+u)*4,dx=((Z(i+1,j)-Z(i-1,j))/(2*g.cs))||0,dy=((Z(i,j+1)-Z(i,j-1))/(2*g.cs))||0,sh=Math.max(.4,Math.min(1.25,.85+(dx-dy)*2.5)),k=(z-mn)/((mx-mn)||1);
+  im.data[o]=Math.min(255,(70+k*170)*sh);im.data[o+1]=Math.min(255,(115+k*80)*sh);im.data[o+2]=Math.min(255,(75+k*70)*sh);im.data[o+3]=210}
+ cx.putImageData(im,0,0);hG.addLayer(L.imageOverlay(cv.toDataURL(),[[la0,lo0],[la1,lo1]],{opacity:.5,interactive:false}))}
+/* Exporte für das Spiel */
+function ascText(){const g=M.g,ls=[`ncols ${g.nx}`,`nrows ${g.ny}`,`xllcorner ${g.x0}`,`yllcorner ${g.y0}`,`cellsize ${g.cs}`,'NODATA_value -9999'];
+ for(let j=g.ny-1;j>=0;j--){const r=new Array(g.nx);for(let i=0;i<g.nx;i++){const z=g.z[j*g.nx+i];r[i]=z===z?z.toFixed(2):'-9999'}ls.push(r.join(' '))}return ls.join('\n')}
+function r16(){const g=M.g;let mn=1e9,mx=-1e9;for(const v of g.z)if(v===v){if(v<mn)mn=v;if(v>mx)mx=v}const u=new Uint16Array(g.nx*g.ny),sp=(mx-mn)||1;let k=0;
+ for(let j=g.ny-1;j>=0;j--)for(let i=0;i<g.nx;i++){const z=g.z[j*g.nx+i];u[k++]=z===z?Math.round((z-mn)/sp*65535):0}return{blob:new Blob([u.buffer],{type:'application/octet-stream'}),mn,mx}}
+$('#xAsc').onclick=()=>{if(!M.g)return msg('Kein Höhenraster geladen.',true);dl('hoehen_utm33.asc',ascText(),'text/plain');msg('ESRI-ASCII-Grid, EPSG:25833, Norden oben, Höhen in m ü. NHN')};
+$('#xR16').onclick=()=>{if(!M.g)return msg('Kein Höhenraster geladen.',true);const r=r16();dl(`hoehen_${M.g.nx}x${M.g.ny}_${r.mn.toFixed(1)}-${r.mx.toFixed(1)}m.r16`,r.blob,'application/octet-stream');msg(`16-Bit-RAW (little-endian, Norden oben): 0 = ${r.mn.toFixed(1)} m, 65535 = ${r.mx.toFixed(1)} m`)};
+$('#xEnv').onclick=()=>{if(!ENV.fc)return msg('Keine Umgebung geladen.',true);dl(slug(PROJ.name)+'-umgebung.geojson',JSON.stringify({...exportE(),attribution:attrLines(),license_note:'OpenStreetMap-Daten unter ODbL 1.0 – Namensnennung siehe attribution'}),'application/geo+json')};
+
+/* ---------- Geometrie-Helfer, Datenprüfung, vereinfachter Spiel-Export, Wasser-Maske ---------- */
+const polyParts=l=>{const a=l.getLatLngs();return Array.isArray(a[0])&&Array.isArray(a[0][0])?a:[a]};   // je Teil: [Außenring, Löcher/Inseln …]
+const inPart=(ll,pt)=>pip(ll,pt[0])&&!pt.slice(1).some(h=>pip(ll,h));
+const waterLayers=()=>[...G.gewaesser.getLayers(),...G.hafen.getLayers()];
+const inWater=ll=>waterLayers().some(l=>polyParts(l).some(pt=>inPart(ll,pt)));
+function segX(a,b,c,d){const o=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]);return o(a,b,c)*o(a,b,d)<0&&o(c,d,a)*o(c,d,b)<0}
+function selfX(r){const P=r.map(fwd),n=P.length;if(n>6000)return null;let k=0;for(let i=0;i<n;i++){const a=P[i],b=P[(i+1)%n];for(let j=i+2;j<n;j++){if(i===0&&j===n-1)continue;if(segX(a,b,P[j],P[(j+1)%n])){if(++k>=5)return k}}}return k}
+function runChecks(){const out=[],E=(t,m)=>out.push([t,m]),gw=G.gewaesser.getLayers();
+ if(!gw.length)E('err','Kein Gewässer vorhanden („💧 See wählen“ oder Fläche zeichnen).');
+ gw.forEach(l=>{const p=l.feature.properties,nm='„'+(p.name||'Gewässer')+'“';let tiny=0,isl=0;
+  if(p.estimated)E('warn',`${nm} ist als geschätzt markiert (Näherung/Platzhalter).`);
+  polyParts(l).forEach(pt=>pt.forEach((r,i)=>{if(r.length<3)return E('err',`${nm}: Ring mit weniger als 3 Punkten.`);
+   const n=selfX(r);if(n===null)E('warn',`${nm}: Ring mit ${r.length} Punkten ist zu groß für die Überschneidungsprüfung (nicht geprüft).`);else if(n>0)E('err',`${nm}: Uferlinie schneidet sich selbst (${n>=5?'mind. 5':n} Stelle(n)).`);
+   if(i>0){isl++;if(area(r)<200)tiny++}}));
+  if(isl)E('info',`${nm}: ${isl} Insel(n)/Loch, davon ${tiny} sehr klein (<200 m²).`)});
+ const bo=G.boje.getLayers();
+ if(gw.length){const dry=bo.filter(b=>!inWater(b.getLatLng()));if(dry.length)E('warn',`${dry.length} Tonne(n) liegen nicht im Wasser: ${dry.slice(0,4).map(b=>b.feature.properties.name||'?').join(', ')}${dry.length>4?' …':''}`)}
+ if(bo.length&&!G.startziel.getLayers().length)E('warn','Tonnen vorhanden, aber keine Start-/Ziellinie.');
+ if(!isFinite(parseFloat($('#wl').value)))E('warn','Wasserspiegel (m ü. NHN) nicht gesetzt.');
+ if(!ENV.fc)E('info','Umgebung nicht geladen (Wald/Gebäude für Windabschattung fehlen).');
+ if(!M.g)E('info','Kein Höhenraster geladen.');
+ if(!WIND.d)E('info','Keine Windstatistik geladen (Hauptwindrichtung fehlt im Export).');
+ if(/Modellschätzung/.test(M.src.depth||''))E('warn','Tiefen sind eine Modellschätzung (Ufer-Abstand), keine Messung.');
+ if(!M.depth.length&&!G.tiefenlinie.getLayers().some(l=>isFinite(parseFloat(l.feature.properties.depth))))E('info','Keine Tiefendaten (Tiefe bleibt im Spiel unbekannt).');
+ if(!out.length)E('ok','Keine Probleme gefunden.');else if(!out.some(o=>o[0]==='err'))E('ok','Keine Fehler. Hinweise/Warnungen oben prüfen.');
+ return out}
+$('#chk').onclick=()=>{const b=$('#chkOut');b.replaceChildren(...runChecks().map(([t,m])=>el('div',{className:'ci-'+t,textContent:({err:'✕ ',warn:'⚠ ',info:'ℹ ',ok:'✓ '})[t]+m})))};
+function dp(P,tol){const n=P.length;if(n<4||!(tol>0))return P;const keep=new Uint8Array(n);keep[0]=keep[n-1]=1;const st=[[0,n-1]];
+ while(st.length){const[a,b]=st.pop(),ax=P[a][0],ay=P[a][1],dx=P[b][0]-ax,dy=P[b][1]-ay,Ln=Math.hypot(dx,dy);let md=0,mi=-1;
+  for(let i=a+1;i<b;i++){const d=Ln?Math.abs(dy*(P[i][0]-ax)-dx*(P[i][1]-ay))/Ln:Math.hypot(P[i][0]-ax,P[i][1]-ay);if(d>md){md=d;mi=i}}
+  if(md>tol&&mi>0){keep[mi]=1;st.push([a,mi],[mi,b])}}
+ return P.filter((_,i)=>keep[i])}
+const sArea=r=>{let s=0;for(let i=0;i<r.length;i++){const j=(i+1)%r.length;s+=r[i][0]*r[j][1]-r[j][0]*r[i][1]}return s/2};
+function gameRing(r,ox,oy,tol,outer){let P=r.map(fwd).map(q=>[q[0]-ox,q[1]-oy]);const q=dp(P.concat([P[0]]),tol);q.pop();if(q.length>=3)P=q;
+ if((sArea(P)>0)!==outer)P.reverse();return P.map(q=>[+q[0].toFixed(2),+q[1].toFixed(2)])}   // Außenring gegen den Uhrzeigersinn, Inseln im Uhrzeigersinn, nicht doppelt geschlossen
+function waterGame(ox,oy,tol){const out=[];waterLayers().forEach(l=>{const p=l.feature.properties;polyParts(l).forEach(pt=>out.push({name:p.name||'',type:p.type,osm:(p.osm&&p.osm.id)||null,outer:gameRing(pt[0],ox,oy,tol,true),islands:pt.slice(1).map(h=>gameRing(h,ox,oy,tol,false))}))});return out}
+function maskParams(box){let cs=+$('#hcs').value||5;const W=box[2]-box[0],H=box[3]-box[1];while(Math.max(W,H)/cs>4096)cs*=2;return{cs,w:Math.ceil(W/cs),h:Math.ceil(H/cs)}}
+function maskCanvas(box){const{cs,w,h}=maskParams(box),cv=document.createElement('canvas');cv.width=w;cv.height=h;const c=cv.getContext('2d');c.fillStyle='#000';c.fillRect(0,0,w,h);c.fillStyle='#fff';
+ waterLayers().forEach(l=>polyParts(l).forEach(pt=>{c.beginPath();pt.forEach(r=>{r.forEach((q,i)=>{const p=fwd(q),x=(p[0]-box[0])/cs,y=h-(p[1]-box[1])/cs;i?c.lineTo(x,y):c.moveTo(x,y)});c.closePath()});c.fill('evenodd')}));return{cv,cs,w,h}}
+$('#xMask').onclick=()=>{if(!waterLayers().length)return msg('Kein Gewässer vorhanden.',true);const box=ENV.box||envBox(),m=maskCanvas(box);
+ m.cv.toBlob(b=>{dl(`${slug(PROJ.name)}-wasser-maske_${m.w}x${m.h}_${m.cs}m.png`,b,'image/png');msg(`Maske ${m.w}×${m.h} px, ${m.cs} m/Pixel, Norden oben: weiß = Wasser, schwarz = Land. Ursprung = SW-Ecke wie im Spiel-Export.`)})};
+
+/* ---------- Windstatistik (Open-Meteo/ERA5) & Höhen für Windabschattung ---------- */
+const WIND={d:null},SECT=['N','NNO','NO','ONO','O','OSO','SO','SSO','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+function windInfo(){const d=WIND.d,b=$('#winfo');if(!d){b.textContent='Windstatistik: nicht geladen';return}
+ const s=d.season,top=s.freq.map((f,k)=>[f,k]).sort((a,b)=>b[0]-a[0]).slice(0,3).map(([f,k])=>`${SECT[k]} ${(f*100).toFixed(0)} %`).join(', ');
+ b.textContent=`Wind Apr–Okt (${d.period}): Hauptrichtung ${SECT[Math.round(d.mainFrom_deg/22.5)%16]} (${d.mainFrom_deg}°, woher), häufigste Sektoren ${top}; ${(s.calm*100).toFixed(0)} % Flaute (<1 m/s)`}
+async function windLoad(){const c=map.getCenter(),y=new Date().getFullYear()-1,a=`${y-4}-01-01`,e=`${y}-12-31`;
+ if(!confirm(`Windstatistik ${a} bis ${e} für ${c.lat.toFixed(3)}°N ${c.lng.toFixed(3)}°E von Open-Meteo (ERA5-Reanalyse, ca. 25 km Raster) abrufen?\nLizenz: CC BY 4.0, kostenlos nur für nicht-kommerzielle Nutzung; Namensnennung nötig. Die Werte sind Regionalwerte, keine Messung am See.`))return;
+ msg('Lade Windstatistik …');
+ try{const r=await fetch(`https://archive-api.open-meteo.com/v1/archive?latitude=${c.lat.toFixed(3)}&longitude=${c.lng.toFixed(3)}&start_date=${a}&end_date=${e}&hourly=wind_speed_10m,wind_direction_10m&wind_speed_unit=ms&timezone=UTC`);
+  if(!r.ok)throw Error('HTTP '+r.status);const d=await r.json(),h=d.hourly;if(!h||!h.time)throw Error('Unerwartete Antwort');
+  const mk=()=>({n:new Array(16).fill(0),s:new Array(16).fill(0),calm:0,tot:0}),A=mk(),S=mk();
+  for(let i=0;i<h.time.length;i++){const v=h.wind_speed_10m[i],w=h.wind_direction_10m[i];if(v==null||w==null)continue;const m=+h.time[i].slice(5,7);
+   for(const q of(m>=4&&m<=10?[A,S]:[A])){q.tot++;if(v<1){q.calm++;continue}const k=Math.floor(((w+11.25)%360)/22.5);q.n[k]++;q.s[k]+=v}}
+  const fin=q=>({freq:q.n.map(n=>+(n/(q.tot||1)).toFixed(4)),mean_ms:q.n.map((n,k)=>n?+(q.s[k]/n).toFixed(2):0),calm:+(q.calm/(q.tot||1)).toFixed(4),hours:q.tot});
+  if(!A.tot)throw Error('Keine Daten erhalten');const sea=fin(S),mk2=sea.freq.indexOf(Math.max(...sea.freq));
+  WIND.d={source:'Open-Meteo Historical Weather API (ERA5), CC BY 4.0 – nicht-kommerzielle Nutzung, Namensnennung nötig',period:a+' bis '+e,lat:+c.lat.toFixed(3),lon:+c.lng.toFixed(3),
+   sectors:'16 Sektoren à 22,5°; Index 0 = Nord (348,75°–11,25°); Richtung = woher der Wind weht; Geschwindigkeit in m/s, 10 m Höhe',all:fin(A),season:sea,mainFrom_deg:mk2*22.5,fetched:new Date().toISOString()};
+  $('#cWind').value=WIND.d.mainFrom_deg;windInfo();autosave();msg('Windstatistik geladen. Hauptwind '+SECT[mk2]+' ('+WIND.d.mainFrom_deg+'°) in den Bahn-Assistenten übernommen.')}
+ catch(err){msg('Windabruf fehlgeschlagen: '+err.message,true)}}
+$('#windLoad').onclick=windLoad;
+function envH(f){const t=f.properties.tags||{},c=f.properties.cls,num=v=>{const n=parseFloat(String(v||'').replace(',','.'));return isFinite(n)&&n>0?n:null};
+ const h=num(t.height)||num(t['building:height']);if(h)return[h,'tag'];
+ if(c==='building'){const lv=num(t['building:levels']);return lv?[lv*3,'levels (3 m je Geschoss)']:[+$('#hBuild').value||8,'default']}
+ if(c==='forest')return[+$('#hForest').value||15,'default'];if(c==='tree')return[8,'default'];if(c==='scrub')return[2,'default'];return[0,'none']}
+
+/* ---------- Bahn-Assistent ---------- */
+let courseN=0;
+function makeCourse(ll){const f=$('#cForm').value,W=((+$('#cWind').value%360)+360)%360,len=+$('#cLen').value,B=+$('#cWid').value;
+ if(!(len>=50&&B>=10))return msg('Schenkellänge mindestens 50 m und Startlinie mindestens 10 m angeben.',true);
+ const r=W*Math.PI/180,u=[Math.sin(r),Math.cos(r)],c=[Math.cos(r),-Math.sin(r)],S=fwd(ll);
+ const P=(a,b)=>inv([S[0]+u[0]*a+c[0]*b,S[1]+u[1]*a+c[1]*b]);   // a = Richtung Wind (Luv), b = nach Steuerbord, Blick gegen den Wind
+ const id='g'+Date.now().toString(36),pre='Bahn '+(++courseN)+' · ',D={group:id,source:'Bahn-Assistent (berechnet)',estimated:false,course:{form:f,windFrom:W,leg_m:len,start_m:B}};
+ const bj=(p,name,col)=>adopt(L.marker(p),{...D,type:'boje',name:pre+name,shape:'spherical',color:col||'#fb8c00'}),pts=[];
+ const s0=P(0,0),pin=P(0,-B/2),stb=P(0,B/2),luv=P(len,0);
+ adopt(L.polyline([pin,stb]),{...D,type:'startziel',name:pre+'Start-/Ziellinie'});pts.push(pin,stb);
+ bj(pin,'Startboje Backbord (Pin)');bj(stb,'Startboje Steuerbord');bj(luv,'Luvtonne','#fdd835');pts.push(luv);
+ let route=[s0,luv];
+ if(f==='ablauf'){const ab=P(len,-0.1*len);bj(ab,'Ablauftonne');pts.push(ab);route=[s0,luv,ab,s0]}
+ else if(f==='leetor'){const gw=Math.max(20,B*0.4),g1=P(-0.12*len,-gw/2),g2=P(-0.12*len,gw/2),gc=P(-0.12*len,0);bj(g1,'Leetor Backbord');bj(g2,'Leetor Steuerbord');pts.push(g1,g2);route=[s0,luv,gc,luv,s0]}
+ else if(f==='dreieck'){const m2=P(len/2,-len*Math.sqrt(3)/2);bj(m2,'Seitentonne (Wing)');pts.push(m2);route=[s0,luv,m2,s0]}
+ else route=[s0,luv,s0];
+ adopt(L.polyline(route),{...D,type:'kurs',name:pre+'Kurs (Tonnen an Backbord)'});
+ const km=route.slice(1).reduce((s,q,i)=>s+dist(route[i],q),0);
+ commit();setMode('select');const first=all().find(x=>x.feature.properties.group===id);pick(first);map.fitBounds(L.latLngBounds(pts).pad(.3));
+ msg(`Bahn erzeugt: Wind aus ${W}°, Kurs ${fmt(km)}. Prüfen mit „Daten prüfen“; bei Bedarf Tonnen im Modus „Bewegen“ anpassen.`)}
+$('#cPlace').onclick=()=>setMode('course');$('#cCenter').onclick=()=>makeCourse(map.getCenter());
+
+/* ---------- Tiefenschätzung (Modell: Tiefe wächst mit dem Abstand zum Ufer) ---------- */
+const dSeg=(p,a,b)=>{const vx=b[0]-a[0],vy=b[1]-a[1],L2=vx*vx+vy*vy;let t=L2?((p[0]-a[0])*vx+(p[1]-a[1])*vy)/L2:0;t=t<0?0:t>1?1:t;return Math.hypot(p[0]-a[0]-t*vx,p[1]-a[1]-t*vy)};
+function estimateDepth(){const gw=G.gewaesser.getLayers();if(!gw.length)return msg('Erst ein Gewässer übernehmen („💧 See wählen“).',true);
+ const sl=(+$('#dSlope').value)/100,mx=+$('#dMax').value;let st=Math.max(10,+$('#dStep').value||25);if(!(sl>0&&mx>0))return msg('Neigung und Maximaltiefe müssen größer als 0 sein.',true);
+ const isEst=/Modellschätzung/.test(M.src.depth||'');
+ if(M.depth.length&&!isEst&&!confirm(`Es sind ${M.depth.length} Tiefenpunkte (Lotungen/Import) geladen. Die Schätzung ersetzt diese Punkte. Fortfahren?\n(Tiefenlinien mit Tiefenwert bleiben erhalten und werden bevorzugt.)`))return;
+ const segs=[];let bx=[1e12,1e12,-1e12,-1e12];
+ gw.forEach(l=>polyParts(l).forEach(pt=>pt.forEach((r,ri)=>{const P=r.map(fwd);if(ri===0)P.forEach(q=>{bx=[Math.min(bx[0],q[0]),Math.min(bx[1],q[1]),Math.max(bx[2],q[0]),Math.max(bx[3],q[1])]});for(let i=0;i<P.length;i++)segs.push([P[i],P[(i+1)%P.length]])})));
+ while((bx[2]-bx[0])/st*((bx[3]-bx[1])/st)>40000)st*=1.5;
+ M.depth=[];const lines=depthSrc().out;M.depth=[];   // nur Tiefenlinien-Stützpunkte (Messdaten sind oben verworfen)
+ const out=[];let maxD=0;
+ for(let x=bx[0]+st/2;x<bx[2];x+=st)for(let y=bx[1]+st/2;y<bx[3];y+=st){const ll=inv([x,y]);if(!inWater(ll))continue;
+  if(lines.some(q=>Math.abs(q.x-x)<40&&Math.abs(q.y-y)<40&&Math.hypot(q.x-x,q.y-y)<40))continue;
+  let d=1e12;for(const s of segs){const v=dSeg([x,y],s[0],s[1]);if(v<d)d=v}
+  const z=Math.min(mx,d*sl);out.push({x,y,v:+z.toFixed(2)});if(z>maxD)maxD=z}
+ if(!out.length){mInfo();return msg('Keine Wasserfläche im Gebiet gefunden – Schätzung nicht möglich.',true)}
+ M.depth=out;M.src.depth=`Modellschätzung: Tiefe = min(${mx} m, Ufer-Abstand × ${(sl*100).toFixed(0)} %), Raster ${st.toFixed(0)} m – KEINE Messung, ${new Date().toLocaleDateString('de')}`;
+ mInfo();autosave();msg(`${out.length} geschätzte Tiefenpunkte (max. ${maxD.toFixed(1)} m). Nur Näherung, echte Lotungen/Tiefenlinien sind besser.`)}
+$('#depthEst').onclick=estimateDepth;
+
+/* ---------- Rechtliche Namensnennung (immer aus den tatsächlich genutzten Daten abgeleitet) ---------- */
+function attrLines(){const o=[],ls=all(),osm=!!(ENV.fc||ls.some(l=>{const p=l.feature.properties;return p.osm||/OpenStreetMap/.test(p.source||'')}));
+ if(osm)o.push('Kartendaten © OpenStreetMap-Mitwirkende, Lizenz ODbL 1.0 (https://www.openstreetmap.org/copyright)');
+ if(ls.some(l=>l.feature.properties.type==='boje'&&l.feature.properties.osm))o.push('Seezeichen: OpenSeaMap / OpenStreetMap-Mitwirkende, ODbL 1.0 (https://www.openseamap.org)');
+ if(WIND.d)o.push('Winddaten: Open-Meteo.com (https://open-meteo.com), Reanalyse ERA5 (Copernicus Climate Change Service / ECMWF), CC BY 4.0');
+ const hs=M.src.height||'';
+ if(/Copernicus/.test(hs))o.push('Höhendaten: Copernicus DEM GLO-90 (© ESA/EU), abgerufen über Open-Meteo, CC BY 4.0');
+ else if(M.g&&hs)o.push('Höhendaten: '+hs+' – Anbieter und Lizenz bitte unter „Weitere Quellen“ ergänzen (z. B. Geobasisdaten des Freistaats Sachsen / GeoSN, Datenlizenz Deutschland – Namensnennung 2.0 – Wortlaut beim Anbieter prüfen)');
+ (PROJ.extra||'').split(/\r?\n/).map(t=>t.trim()).filter(Boolean).forEach(t=>o.push(t));return o}
+function attrShow(){const b=$('#attrNow');if(!b)return;const a=attrLines();b.replaceChildren(...(a.length?a.map(t=>el('div',{textContent:'• '+t})):[el('div',{textContent:'Keine fremden Daten im Projekt – keine Pflichtnennung erkennbar.'})]))}
+function attrText(){const a=attrLines(),d=new Date().toLocaleDateString('de');return `NAMENSNENNUNG – Projekt „${PROJ.name}“ (Stand ${d})
+Erzeugt mit Seekoje (Prototyp). Kein Navigationsprodukt.
+
+1) TEXT FÜR CREDITS / INFO-BILDSCHIRM / KARTEN-FUSSZEILE
+${a.length?a.map(t=>'- '+t).join('\n'):'- (keine fremden Daten im Projekt)'}
+
+2) HINWEISE (keine Rechtsberatung)
+- OpenStreetMap (ODbL): Karten, Spielgrafiken und Screenshots sind „Produced Works“: dort genügt die sichtbare Namensnennung. Die exportierten Daten (Spiel-JSON, GeoJSON, GPX, Wasser-Maske, Umgebung) sind abgeleitete Datenbanken: Werden sie öffentlich weitergegeben (z. B. in einem öffentlichen GitHub-Repository), müssen sie unter ODbL 1.0 stehen und die Namensnennung beiliegen (Lizenztext: https://opendatacommons.org/licenses/odbl/1-0/).
+- Open-Meteo (CC BY 4.0): kostenlos nur für nicht-kommerzielle Nutzung; Namensnennung erforderlich. Werte sind Regionalwerte (ERA5, ca. 25 km), keine Messung am See.
+- Copernicus DEM / GeoSN-Höhendaten: Namensnennung und Lizenzbedingungen des jeweiligen Anbieters beachten.
+- Tiefen mit dem Vermerk „Modellschätzung“ sind keine Messwerte.
+- Kartenkacheln (OSM-Standardserver) und Nominatim/Overpass: nur für leichte Nutzung; Nutzungsrichtlinien beachten.
+`}
+$('#xAttr').onclick=()=>{dl(slug(PROJ.name)+'-namensnennung.txt',attrText(),'text/plain');msg('Namensnennung exportiert')};
+$('#attrExtra').onchange=e=>{PROJ.extra=e.target.value;attrShow();autosave()};
+
+/* ---------- Revierkarte als PNG (eigene Vektor-Darstellung, Namensnennung im Bild) ---------- */
+function revierkarte(){
+ const gw=waterLayers(),src=gw.length?gw:all();let bx=null;
+ const ext=p=>{bx=bx?[Math.min(bx[0],p[0]),Math.min(bx[1],p[1]),Math.max(bx[2],p[0]),Math.max(bx[3],p[1])]:[p[0],p[1],p[0],p[1]]};
+ src.forEach(l=>{if(l instanceof L.Marker)ext(fwd(l.getLatLng()));else rings(l.getLatLngs()).forEach(r=>r.forEach(q=>ext(fwd(q))))});
+ if(!bx)return msg('Nichts zu zeichnen: Gewässer oder Objekte fehlen.',true);
+ const pad=Math.max(100,Math.max(bx[2]-bx[0],bx[3]-bx[1])*.08);bx=[bx[0]-pad,bx[1]-pad,bx[2]+pad,bx[3]+pad];
+ const bw=bx[2]-bx[0],bh=bx[3]-bx[1],k=Math.min(2000/bw,3200/bh),W=Math.round(bw*k),H=Math.round(bh*k);
+ const lines=[...attrLines(),'Kein Navigationsprodukt. Erstellt mit Seekoje am '+new Date().toLocaleDateString('de')+'.'];
+ const cv=document.createElement('canvas'),c=cv.getContext('2d');c.font='20px sans-serif';
+ const wrap=[];lines.forEach(t=>{let cur='';t.split(' ').forEach(w=>{const n=cur?cur+' '+w:w;if(c.measureText(n).width>W-40&&cur){wrap.push(cur);cur=w}else cur=n});wrap.push(cur)});
+ const FH=24+wrap.length*26;cv.width=W;cv.height=H+FH;
+ const X=x=>(x-bx[0])*k,Y=y=>H-(y-bx[1])*k,P4=q=>proj4('EPSG:4326','EPSG:25833',[q[0],q[1]]);
+ c.fillStyle='#ebe7da';c.fillRect(0,0,W,H+FH);c.save();c.beginPath();c.rect(0,0,W,H);c.clip();
+ const path=(co,mapFn,close)=>{co.forEach((q,i)=>{const p=mapFn(q);i?c.lineTo(X(p[0]),Y(p[1])):c.moveTo(X(p[0]),Y(p[1]))});if(close)c.closePath()};
+ const geoDraw=(g,fill,stroke,w,dash)=>{c.lineJoin='round';c.setLineDash(dash||[]);const polys=g.type==='Polygon'?[g.coordinates]:g.type==='MultiPolygon'?g.coordinates:null;
+  if(polys){c.beginPath();polys.forEach(pl=>pl.forEach(r=>path(r,P4,true)));if(fill){c.fillStyle=fill;c.fill('evenodd')}if(stroke){c.strokeStyle=stroke;c.lineWidth=w||1;c.stroke()}}
+  else if(g.type==='LineString'&&stroke){c.beginPath();path(g.coordinates,P4);c.strokeStyle=stroke;c.lineWidth=w||1;c.stroke()}};
+ const FILL={forest:'#bcd7a4',scrub:'#cde0ae',grass:'#dbe8c2',farmland:'#efe8c0',wetland:'#bfdcd2',beach:'#f1e4b0',urban:'#dad6d2',other:'#e4e0d3',water:'#9cc9e3',building:'#b5a596',harbor:'#c9c9c9'};
+ if(ENV.fc){const F=ENV.fc.features,pass=cl=>F.filter(f=>cl.includes(f.properties.cls));
+  pass(['forest','scrub','grass','farmland','wetland','beach','urban','other']).forEach(f=>geoDraw(f.geometry,FILL[f.properties.cls],null));
+  pass(['water']).forEach(f=>geoDraw(f.geometry,FILL.water,'#6fa8cc',1));pass(['waterway']).forEach(f=>geoDraw(f.geometry,null,'#7fb6d6',2));
+  pass(['harbor']).forEach(f=>geoDraw(f.geometry,FILL.harbor,'#888',1));pass(['building']).forEach(f=>geoDraw(f.geometry,FILL.building,'#8a7a6a',1));
+  pass(['road']).forEach(f=>geoDraw(f.geometry,null,'#ffffff',3));pass(['path']).forEach(f=>geoDraw(f.geometry,null,'#a47f55',1.5,[6,4]));pass(['rail']).forEach(f=>geoDraw(f.geometry,null,'#777',2,[10,5]))}
+ const own=all().sort((a,b)=>(({gewaesser:0,hafen:1})[a.feature.properties.type]??2)-(({gewaesser:0,hafen:1})[b.feature.properties.type]??2)),nb=own.filter(l=>l.feature.properties.type==='boje').length;
+ const halo=(t,x,y)=>{c.font='bold 17px sans-serif';c.lineWidth=4;c.strokeStyle='rgba(255,255,255,.9)';c.strokeText(t,x,y);c.fillStyle='#14202a';c.fillText(t,x,y)};
+ own.forEach(l=>{const p=l.feature.properties,t=T[p.type],col=safeColor(p.color)||t.c;c.setLineDash([]);
+  if(l instanceof L.Marker){const q=fwd(l.getLatLng()),x=X(q[0]),y=Y(q[1]),r=p.type==='boje'?9:6;c.beginPath();c.arc(x,y,r,0,7);c.fillStyle=col;c.fill();c.lineWidth=2;c.strokeStyle='#14202a';c.stroke();
+   if(nb<=40&&p.name&&(p.type==='boje'||p.type==='wegpunkt'))halo(p.name,x+r+4,y+5);return}
+  const g=gk(l);
+  if(g==='Polygon'){const isW=p.type==='gewaesser'||p.type==='hafen';c.beginPath();polyParts(l).forEach(pt=>pt.forEach(r=>path(r,fwd,true)));
+   c.fillStyle=isW?(p.type==='gewaesser'?'#9cc9e3':'#8fc0dc'):col+'66';c.fill('evenodd');c.strokeStyle=isW?'#2f86b8':col;c.lineWidth=isW?2.5:2;c.setLineDash(t.d?t.d.split(' ').map(n=>n*2):[]);c.stroke()}
+  else{c.beginPath();rings(l.getLatLngs()).forEach(r=>path(r,fwd));c.strokeStyle=col;c.lineWidth=Math.max(2,(t.w||3)*(p.type==='ufer'?.7:1.2));c.setLineDash(t.d?t.d.split(' ').map(n=>n*2.5):[]);c.stroke()}});
+ c.restore();
+ // Titel
+ c.font='bold 36px sans-serif';const tw=c.measureText(PROJ.name).width;c.fillStyle='rgba(255,255,255,.88)';c.fillRect(16,16,tw+32,64);c.fillStyle='#14202a';c.fillText(PROJ.name,32,60);
+ // Maßstab
+ const nice=[20,50,100,200,500,1000,2000,5000].filter(v=>v<=bw*.25).pop()||20,sl=nice*k,sx=24,sy=H-30;c.fillStyle='rgba(255,255,255,.85)';c.fillRect(sx-8,sy-34,sl+16+60,54);
+ c.fillStyle='#14202a';c.fillRect(sx,sy,sl/2,8);c.fillStyle='#fff';c.fillRect(sx+sl/2,sy,sl/2,8);c.strokeStyle='#14202a';c.lineWidth=2;c.strokeRect(sx,sy,sl,8);c.font='bold 18px sans-serif';c.fillStyle='#14202a';c.fillText(nice>=1000?nice/1000+' km':nice+' m',sx+sl+8,sy+9);
+ // Nordpfeil + Hauptwind
+ const arrow=(cx,cy,deg,col,label)=>{c.save();c.translate(cx,cy);c.rotate(deg*Math.PI/180);c.fillStyle=col;c.beginPath();c.moveTo(0,-34);c.lineTo(13,12);c.lineTo(0,5);c.lineTo(-13,12);c.closePath();c.fill();c.restore();c.font='bold 18px sans-serif';c.fillStyle='#14202a';c.textAlign='center';c.fillText(label,cx,cy+36);c.textAlign='left'};
+ c.fillStyle='rgba(255,255,255,.85)';c.fillRect(W-130,16,114,WIND.d?200:92);arrow(W-73,56,0,'#14202a','N');
+ if(WIND.d)arrow(W-73,146,(WIND.d.mainFrom_deg+180)%360,'#2f86b8','Wind '+SECT[Math.round(WIND.d.mainFrom_deg/22.5)%16]);
+ // Fußzeile mit Namensnennung
+ c.fillStyle='#fff';c.fillRect(0,H,W,FH);c.strokeStyle='#14202a';c.lineWidth=1;c.beginPath();c.moveTo(0,H+.5);c.lineTo(W,H+.5);c.stroke();c.font='20px sans-serif';c.fillStyle='#14202a';wrap.forEach((t,i)=>c.fillText(t,20,H+30+i*26));
+ return{cv,W,H:H+FH,k}}
+$('#xMap').onclick=()=>{const m=revierkarte();if(!m)return;m.cv.toBlob(b=>{dl(slug(PROJ.name)+'-revierkarte.png',b,'image/png');msg(`Revierkarte ${m.W}×${m.H} px mit Namensnennung in der Fußzeile.`)})};
+function gameExport(){const box=ENV.box||envBox(),ox=box[0],oy=box[1],g=M.g;
+ const cv=c=>typeof c[0]==='number'?(p=>[+(p[0]-ox).toFixed(2),+(p[1]-oy).toFixed(2)])(proj4('EPSG:4326','EPSG:25833',c)):c.map(cv),cg=q=>({type:q.type,coordinates:cv(q.coordinates)}),wl=parseFloat($('#wl').value);
+ const o84=inv([ox,oy]),tol=parseFloat($('#simp').value)||0,mk=maskParams(box);
+ return{format:'seekoje-spiel-1',project:PROJ.name,attribution:attrLines(),license_note:'Abgeleitete Datenbank aus OpenStreetMap (ODbL 1.0): bei Weitergabe unter ODbL stellen und attribution beilegen. Im Spiel sichtbar nennen.',origin_wgs84:{lat:+o84.lat.toFixed(6),lon:+o84.lng.toFixed(6)},crs:'EPSG:25833',units:'m',axes:'x = Ost, y = Nord, Ursprung = Südwest-Ecke des Gebiets',origin_utm:{x:ox,y:oy},size:{w:box[2]-box[0],h:box[3]-box[1]},waterLevel_m_NHN:isFinite(wl)?wl:null,
+  heights:g?{files:'Höhenraster separat als .asc/.r16 exportieren',cellsize:g.cs,ncols:g.nx,nrows:g.ny,lowerLeft:{x:g.x0-ox,y:g.y0-oy},source:M.src.height||''}:null,
+  sources:['OpenStreetMap-Mitwirkende (ODbL)',M.src.height||null,M.src.depth||null].filter(Boolean),
+  water:waterGame(ox,oy,tol),simplify_m:tol,
+  mask:{file:'separat per „Wasser-Maske .png“ exportieren',cellsize:mk.cs,ncols:mk.w,nrows:mk.h,lowerLeft:{x:0,y:0},north:'oben',white:'Wasser',black:'Land'},
+  objects:JSON.parse(ser()).features.map(f=>({...f.properties,geometry:cg(f.geometry)})),
+  depthEstimated:/Modellschätzung/.test(M.src.depth||''),depthSource:M.src.depth||null,
+  depthPoints:M.depth.map(q=>[+(q.x-ox).toFixed(1),+(q.y-oy).toFixed(1),q.v]),
+  wind:WIND.d,
+  environment:(ENV.fc?ENV.fc.features:[]).map(f=>{const[h,hs]=envH(f);return{cls:f.properties.cls,name:f.properties.name||'',osm:f.properties.osm,h_m:h,h_src:hs,geometry:cg(f.geometry)}})}}
+$('#xGame').onclick=()=>{if(!all().length&&!ENV.fc)return msg('Nichts zu exportieren.',true);dl(slug(PROJ.name)+'-spiel.json',JSON.stringify(gameExport()),'application/json');msg('Spiel-Export in Metern (UTM33, Ursprung SW-Ecke)')};
+$('#envClear').onclick=()=>{if((ENV.fc||M.g)&&confirm('Geladene Umgebung und Höhenraster entfernen?')){ENV.fc=null;ENV.box=null;M.g=null;M.acc=null;delete M.src.height;refreshEnv();mInfo()}};
+
+/* Startgewässer: Platzhalter-Ellipse (KEIN echter Uferverlauf) */
+function lake(){const c=fwd(L.latLng(51.26944,12.33528)),a=1500,b=925,r=-10*Math.PI/180,pts=[];
+ for(let i=0;i<72;i++){const t=i/72*2*Math.PI,x=b*Math.cos(t),y=a*Math.sin(t);pts.push(inv([c[0]+x*Math.cos(r)-y*Math.sin(r),c[1]+x*Math.sin(r)+y*Math.cos(r)]))}
+ const l=adopt(L.polygon(pts),{type:'gewaesser',name:'Cospudener See (Näherung)',estimated:true,
+  source:'Näherung: Mittelpunkt Wikipedia 51,26944°N 12,33528°E; Fläche 4,36 km² (seen.de). Umriss NICHT real – durch OSM-Import ersetzen',notes:'Platzhalter-Ellipse, Ausrichtung geschätzt. Kein echter Uferverlauf.'});
+ map.fitBounds(l.getBounds().pad(.25),{animate:false})}
+$('#sideBtn').onclick=()=>$('#side').classList.toggle('open');
+$('#src').innerHTML+='<br><b>Startgewässer:</b> geschätzte Ellipse (Mittelpunkt Wikipedia, Fläche 4,36 km² laut seen.de), kein realer Umriss.';
+envInfo();windInfo();attrShow();layerUI();setMode('select');setName(PROJ.name);
+(async()=>{const s=await autoload();let ok=false;
+ if(s){try{applyProject(JSON.parse(s));ok=true}catch(e){all().forEach(drop)}}
+ if(!ok&&!all().length)lake();commit();autoOn=true;if(ok)msg('Letztes Projekt „'+PROJ.name+'“ wiederhergestellt')})();
+})();
+</script>
+<script>if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));</script>
+</body></html>
