@@ -8,12 +8,16 @@ on:
         description: 'Revier (Schlüssel in revier_bauen.py)'
         required: true
         default: 'hiddensee'
+      neu_laden:
+        description: 'Alle Daten neu herunterladen (sonst Zwischenspeicher vom letzten Lauf nutzen)'
+        type: boolean
+        default: false
 permissions:
   contents: write
 jobs:
   bauen:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       REVIER: ${{ inputs.revier }}
     steps:
@@ -22,9 +26,25 @@ jobs:
         with:
           python-version: '3.12'
       - name: Pakete installieren
-        run: pip install numpy scipy requests pillow tifffile imagecodecs
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q osmium-tool
+          pip install numpy scipy requests pillow tifffile imagecodecs
+      - name: Zwischenspeicher holen
+        if: ${{ !inputs.neu_laden }}
+        uses: actions/cache/restore@v4
+        with:
+          path: .revier-cache
+          key: revier-${{ inputs.revier }}-${{ github.run_id }}
+          restore-keys: revier-${{ inputs.revier }}-
       - name: Revier bauen
-        run: python revier_bauen.py "$REVIER"
+        run: python -u revier_bauen.py "$REVIER"
+      - name: Zwischenspeicher sichern (auch bei Abbruch)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .revier-cache
+          key: revier-${{ inputs.revier }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Ergebnis einchecken
         run: |
           git config user.name "github-actions[bot]"
