@@ -7,7 +7,7 @@ on:
       revier:
         description: 'Revier (Schlüssel in revier_bauen.py)'
         required: true
-        default: 'hiddensee'
+        default: 'ruegen'
       neu_laden:
         description: 'Alle Daten neu herunterladen (sonst Zwischenspeicher vom letzten Lauf nutzen)'
         type: boolean
@@ -17,7 +17,7 @@ permissions:
 jobs:
   bauen:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     env:
       REVIER: ${{ inputs.revier }}
     steps:
@@ -49,6 +49,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add "$REVIER"-revier.json "$REVIER"-gelaende.bin "$REVIER"-umgebung.json "$REVIER"-maske.png "$REVIER"-vorschau.png "$REVIER"-namensnennung.txt
+          git add -A -- ":(glob)${REVIER}-*"
           git commit -m "Revier $REVIER neu gebaut" || echo "Keine Änderungen"
           git push
