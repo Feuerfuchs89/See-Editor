@@ -8,7 +8,8 @@ für die Revierkarte und das Spiel. Läuft als GitHub Action (Datei .github/work
 oder lokal:   python revier_bauen.py hiddensee
 
 Quellen
-- Küstenlinie, Umgebung, Seezeichen: OpenStreetMap / OpenSeaMap über Overpass (ODbL)
+- Küstenlinie, Umgebung, Seezeichen: OpenStreetMap / OpenSeaMap, Landesauszug von Geofabrik,
+  zugeschnitten mit osmium-tool (ODbL)
 - Wassertiefe: EMODnet Digital Bathymetry (DTM), WCS, ca. 115 m Raster (CC BY 4.0)
 - Gelände: Copernicus DEM GLO-30 (Oberflächenmodell, 30 m), AWS Open Data
 
@@ -38,13 +39,11 @@ REVIERE = {
         maske=5,         # Wasser-Maske in m
         ufer_tol=1.0,    # Ufer-Vereinfachung (Douglas-Peucker) in m
         hang=0.10,       # max. Unterwasser-Neigung am Ufer (Glättung der 115-m-Tiefen), 0 = aus
+        osm='https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
         regatten=['Blaues Band vom Strelasund (Stralsund → Neuendorf/Hiddensee)', 'Rund Hiddensee'],
     ),
 }
 
-OVERPASS = ['https://overpass-api.de/api/interpreter',
-            'https://overpass.private.coffee/api/interpreter',
-            'https://maps.mail.ru/osm/tools/overpass/api/interpreter']
 EMODNET_WCS = 'https://ows.emodnet-bathymetry.eu/wcs'
 COP30 = 'https://copernicus-dem-30m.s3.amazonaws.com/{n}/{n}.tif'
 UA = {'User-Agent': 'Seekoje-Revierbauer/1.0 (github.com/Feuerfuchs89; Segelsimulation, nicht kommerziell)'}
@@ -143,53 +142,95 @@ class Netz:
     def _pfad(self, name):
         return os.path.join(self.cache, name)
 
-    def overpass(self, name, query):
-        p = self._pfad(name + '.json')
-        if os.path.exists(p):
-            return json.load(open(p, encoding='utf-8'))
-        if self.offline:
-            warn(f'offline: {name} fehlt im Zwischenspeicher – leer')
-            return {'elements': []}
-        for runde in range(3):
-            for url in OVERPASS:
-                try:
-                    r = requests.post(url, data={'data': query}, headers=UA, timeout=400)
-                    if r.status_code == 200:
-                        d = r.json()
-                        if d.get('remark') and 'error' in d['remark'].lower():
-                            raise RuntimeError(d['remark'])
-                        json.dump(d, open(p, 'w', encoding='utf-8'))
-                        time.sleep(2)
-                        return d
-                    log(f'  Overpass {url} → HTTP {r.status_code}')
-                except Exception as ex:
-                    log(f'  Overpass {url} → {ex}')
-                time.sleep(10)
-            time.sleep(30 * (runde + 1))
-        raise RuntimeError(f'Overpass-Abfrage {name} fehlgeschlagen')
-
-    def datei(self, name, url, params=None, pflicht=False):
+    def datei(self, name, url, params=None, pflicht=False, nur_pfad=False):
         p = self._pfad(name)
         if os.path.exists(p):
-            return open(p, 'rb').read()
+            log(f'  {name}: aus Zwischenspeicher')
+            return p if nur_pfad else open(p, 'rb').read()
         if self.offline:
             warn(f'offline: {name} fehlt im Zwischenspeicher')
             return None
         for v in range(3):
             try:
-                r = requests.get(url, params=params, headers=UA, timeout=600)
-                if r.status_code == 200 and len(r.content) > 1000:
-                    open(p, 'wb').write(r.content)
-                    return r.content
-                log(f'  {url} → HTTP {r.status_code}, {len(r.content)} Bytes: {r.content[:200]!r}')
-                if r.status_code == 404:
-                    break
+                log(f'  lade {name} …'); t0 = time.time()
+                with requests.get(url, params=params, headers=UA, timeout=(20, 300), stream=True) as r:
+                    if r.status_code == 200:
+                        with open(p + '.teil', 'wb') as f:
+                            for ch in r.iter_content(1 << 20):
+                                f.write(ch)
+                        if os.path.getsize(p + '.teil') > 1000:
+                            os.replace(p + '.teil', p)
+                            log(f'  {name}: {os.path.getsize(p) / 1e6:.1f} MB in {time.time() - t0:.0f} s')
+                            return open(p, 'rb').read() if not nur_pfad else p
+                    body = r.content[:200] if r.status_code != 200 else b''
+                    log(f'  {url} → HTTP {r.status_code} {body!r}')
+                    if r.status_code == 404:
+                        break
             except Exception as ex:
                 log(f'  {url} → {ex}')
             time.sleep(15 * (v + 1))
         if pflicht:
             raise RuntimeError(f'Download {name} fehlgeschlagen')
         return None
+
+
+# ------------------------------------------------------------------ OSM: Geofabrik-Auszug + osmium
+UMG_FILTER = [
+    'nwr/landuse', 'nwr/natural=wood,scrub,heath,wetland,beach,sand,grassland,water,cliff,bare_rock',
+    'w/building', 'w/highway=motorway,trunk,primary,secondary,tertiary,unclassified,residential,service,living_street,'
+                  'motorway_link,trunk_link,primary_link,secondary_link,tertiary_link,track,path,footway,cycleway,bridleway,steps,pedestrian',
+    'w/railway=rail', 'nwr/leisure=marina,slipway', 'nwr/man_made=pier,breakwater,groyne,quay,lighthouse,tower,bridge',
+    'nwr/harbour', 'w/waterway=river,canal,stream,ditch,dock',
+    'n/place=city,town,village,hamlet,isolated_dwelling,island,islet,locality,peninsula', 'n/natural=peak,cape']
+TEILE = {'kueste': ['w/natural=coastline'], 'seezeichen': ['nwr/seamark:type'], 'umgebung': UMG_FILTER}
+
+
+def osm_daten(netz, geb, cfg, mit_umgebung=True):
+    """Liefert {'kueste': [...], 'seezeichen': [...], 'umgebung': [...]} als GeoJSON-Features."""
+    import shutil, subprocess
+    teile = [t for t in TEILE if mit_umgebung or t != 'umgebung']
+    ziel = {t: netz._pfad(f'osm_{t}.geojsonseq') for t in teile}
+    if not all(os.path.exists(v) for v in ziel.values()):
+        if netz.offline:
+            warn('offline: OSM-Auszüge fehlen im Zwischenspeicher – leer')
+            return {t: (lies_seq(ziel[t]) if os.path.exists(ziel[t]) else []) for t in teile}
+        if not shutil.which('osmium'):
+            raise RuntimeError('osmium-tool fehlt (in der Action: sudo apt-get install -y osmium-tool)')
+        log('OSM-Landesauszug (Geofabrik) laden …')
+        pbf = netz.datei('land.osm.pbf', cfg['osm'], pflicht=True, nur_pfad=True)
+        w, s, e, n = geb.llbox(3000)
+        rev = netz._pfad('revier.osm.pbf')
+        lauf = lambda *a: (log('  osmium ' + ' '.join(a[:2])), subprocess.run(['osmium', *a], check=True))
+        lauf('extract', '-b', f'{w:.5f},{s:.5f},{e:.5f},{n:.5f}', '-s', 'smart', pbf, '-o', rev, '--overwrite')
+        konf = netz._pfad('nur_linien.json')
+        json.dump({'linear_tags': True, 'area_tags': False}, open(konf, 'w'))
+        for t in teile:
+            f = netz._pfad(f'osm_{t}.osm.pbf')
+            lauf('tags-filter', rev, *TEILE[t], '-o', f, '--overwrite')
+            extra = ['-c', konf] if t == 'kueste' else []      # Küste als Linien: Wegrichtung (Land links) bleibt erhalten
+            lauf('export', f, '-f', 'geojsonseq', '-x', 'print_record_separator=false', '-a', 'type,id', *extra, '-o', ziel[t], '--overwrite')
+    out = {}
+    for t in teile:
+        out[t] = lies_seq(ziel[t]); log(f'  OSM {t}: {len(out[t])} Objekte')
+    return out
+
+
+def lies_seq(pfad):
+    feats = []
+    for z in open(pfad, encoding='utf-8'):
+        z = z.strip().lstrip('\x1e')
+        if z:
+            feats.append(json.loads(z))
+    return feats
+
+
+def ringe_von(geom):
+    """Polygon/MultiPolygon → Liste von Polygonen (je Liste von Ringen aus (lon,lat))."""
+    if geom['type'] == 'Polygon':
+        return [geom['coordinates']]
+    if geom['type'] == 'MultiPolygon':
+        return geom['coordinates']
+    return []
 
 
 # ------------------------------------------------------------------ Geometrie-Helfer
@@ -378,11 +419,15 @@ class Rechteck:
         return ringe
 
 
-def kueste(netz, geb, cfg):
-    log('Küstenlinie laden …')
-    w, s, e, n = geb.llbox(3000)
-    d = netz.overpass('kueste', f'[out:json][timeout:300];way["natural"="coastline"]({s},{w},{n},{e});out geom;')
-    wege = [[(p['lon'], p['lat']) for p in el['geometry']] for el in d['elements'] if el.get('geometry')]
+def kueste(feats, geb, cfg):
+    log('Küstenlinie verarbeiten …')
+    wege = []
+    for f in feats:
+        g = f.get('geometry') or {}
+        if g.get('type') == 'LineString':
+            wege.append([tuple(c[:2]) for c in g['coordinates']])
+        elif g.get('type') == 'MultiLineString':
+            wege += [[tuple(c[:2]) for c in l] for l in g['coordinates']]
     log(f'  {len(wege)} Küstenwege')
     R = Rechteck(geb.W, geb.H)
     stuecke, insel, seen = [], [], []
@@ -569,28 +614,29 @@ def gelaende(netz, geb, cfg, wasser_im):
 
 
 # ------------------------------------------------------------------ Seezeichen
-def seezeichen(netz, geb):
-    log('Seezeichen laden …')
-    w, s, e, n = geb.llbox(500)
-    d = netz.overpass('seezeichen', f'[out:json][timeout:200];nwr["seamark:type"]({s},{w},{n},{e});out tags geom;')
+def seezeichen(feats, geb):
+    log('Seezeichen verarbeiten …')
     pkt, lin = [], []
-    for el in d['elements']:
-        t = el.get('tags', {}); typ = t.get('seamark:type', '')
+    for el in feats:
+        t = el.get('properties', {}); typ = t.get('seamark:type', ''); g = el.get('geometry') or {}
         p = lambda k: t.get(f'seamark:{typ}:{k}', '')
         info = {k: v for k, v in dict(
             typ=typ, name=t.get('seamark:name') or t.get('name', ''), farbe=p('colour'), muster=p('colour_pattern'),
             form=p('shape'), kategorie=p('category'), toppzeichen=t.get('seamark:topmark:shape', ''),
             licht=' '.join(x for x in (t.get('seamark:light:character', ''), t.get('seamark:light:colour', ''),
                                        (t.get('seamark:light:period', '') + 's') if t.get('seamark:light:period') else '') if x),
-            osm=f"{el['type'][0]}{el['id']}").items() if v}
-        if el['type'] == 'node':
-            x, y = geb.to_m(el['lon'], el['lat'])
+            osm=f"{str(t.get('@type', 'x'))[:1]}{t.get('@id', '')}").items() if v}
+        if g.get('type') == 'Point':
+            x, y = geb.to_m(*g['coordinates'][:2])
             if 0 <= x <= geb.W and 0 <= y <= geb.H:
                 pkt.append({**info, 'x': round(float(x), 1), 'y': round(float(y), 1)})
-        elif el.get('geometry'):
-            lo, la = np.array([(q['lon'], q['lat']) for q in el['geometry']]).T
-            x, y = geb.to_m(lo, la)
-            lin.append({**info, 'p': [[round(a, 1), round(b, 1)] for a, b in zip(x.tolist(), y.tolist())]})
+        else:
+            linien = [g['coordinates']] if g.get('type') == 'LineString' else g.get('coordinates', []) if g.get('type') == 'MultiLineString' \
+                else [pl[0] for pl in ringe_von(g)]
+            for l in linien:
+                if len(l) < 2: continue
+                lo, la = np.array([c[:2] for c in l]).T; x, y = geb.to_m(lo, la)
+                lin.append({**info, 'p': [[round(a, 1), round(b, 1)] for a, b in zip(x.tolist(), y.tolist())]})
     log(f'  {len(pkt)} Seezeichen, {len(lin)} Linien/Flächen')
     return pkt, lin
 
@@ -637,100 +683,52 @@ def hoehe_von(c, t, std):
     return {'building': std['gebaeude'], 'forest': std['wald'], 'scrub': 2.0, 'tree': 8.0, 'lighthouse': 20.0, 'tower': 15.0}.get(c, 0.0), 'default'
 
 
-FLAECHENTAGS = ('building', 'landuse', 'leisure', 'amenity', 'harbour', 'place')
-
-
-def ist_flaeche(t, zu):
-    if not zu: return False
-    if t.get('area') == 'yes': return True
-    if t.get('area') == 'no' or 'highway' in t or 'barrier' in t or 'waterway' in t and t.get('waterway') not in ('riverbank', 'dock'): return False
-    if t.get('natural') in ('cliff', 'tree_row', 'coastline'): return False
-    if t.get('man_made') in ('pier', 'breakwater', 'groyne'): return True
-    return any(k in t for k in FLAECHENTAGS) or t.get('natural') in FL_NAT
-
-
-def umgebung(netz, geb, std):
-    w, s, e, n = geb.llbox(800)
-    sch = 0.08
-    ni, nj = max(1, math.ceil((e - w) / sch)), max(1, math.ceil((n - s) / sch))
-    log(f'Umgebung laden ({ni}×{nj} Abfragen) …')
+def umgebung(osm, geb, std):
+    log('Umgebung verarbeiten …')
     feats, seen = [], set()
     flat = lambda P: [v for p in P for v in (int(round(p[0])), int(round(p[1])))]
-    for i in range(ni):
-        for j in range(nj):
-            bw, be_ = w + i * (e - w) / ni, w + (i + 1) * (e - w) / ni
-            bs, bn = s + j * (n - s) / nj, s + (j + 1) * (n - s) / nj
-            b = f'{bs:.5f},{bw:.5f},{bn:.5f},{be_:.5f}'
-            q = (f'[out:json][timeout:300];('
-                 f'nwr["landuse"]({b});'
-                 f'nwr["natural"~"^(wood|scrub|heath|wetland|beach|sand|grassland|water|cliff|bare_rock)$"]({b});'
-                 f'way["building"]({b});'
-                 f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|track|path|footway|cycleway|bridleway|steps|pedestrian)(_link)?$"]({b});'
-                 f'way["railway"="rail"]({b});'
-                 f'nwr["leisure"~"^(marina|slipway)$"]({b});'
-                 f'nwr["man_made"~"^(pier|breakwater|groyne|quay|lighthouse|tower|bridge)$"]({b});'
-                 f'nwr["harbour"]({b});'
-                 f'way["waterway"~"^(river|canal|stream|ditch|dock)$"]({b});'
-                 f'node["place"~"^(city|town|village|hamlet|isolated_dwelling|island|islet|locality|peninsula)$"]({b});'
-                 f'node["natural"~"^(peak|cape)$"]["name"]({b});'
-                 f');out tags geom;')
-            d = netz.overpass(f'umgebung_{i}_{j}', q)
-            for el in d['elements']:
-                uid = el['type'][0] + str(el['id'])
-                if uid in seen:
-                    continue
-                seen.add(uid)
-                t = el.get('tags', {}); c = klasse(t)
-                if c == 'other' and t.get('natural') not in ('peak', 'cape'):
-                    continue
-                if t.get('natural') in ('peak', 'cape'): c = 'place'
-                h, hs = hoehe_von(c, t, std)
-                f = dict(c=c, osm=uid)
-                if t.get('name'): f['n'] = t['name']
-                if h: f['h'] = round(h, 1); f['hs'] = hs
-                sub = t.get('highway') or t.get('place') or t.get('landuse') or t.get('natural') or t.get('man_made') or t.get('leisure') or t.get('waterway')
-                if sub: f['s'] = sub
-                if el['type'] == 'node':
-                    x, y = geb.to_m(el['lon'], el['lat'])
-                    f['t'] = 'N'; f['g'] = [int(round(float(x))), int(round(float(y)))]
-                elif el['type'] == 'way' and el.get('geometry'):
-                    lo, la = np.array([(q['lon'], q['lat']) for q in el['geometry']]).T
-                    x, y = geb.to_m(lo, la); P = np.c_[x, y]
-                    zu = len(P) > 3 and np.allclose(P[0], P[-1])
-                    if ist_flaeche(t, zu):
-                        P = dp_ring(P, 1.5 if c == 'building' else 3)
-                        if len(P) < 3: continue
-                        f['t'] = 'P'; f['g'] = [flat(P)]
-                    else:
-                        P = dp(P, 2)
-                        f['t'] = 'L'; f['g'] = flat(P)
-                elif el['type'] == 'relation':
-                    au, inn = [], []
-                    for m in el.get('members', []):
-                        if m.get('type') == 'way' and m.get('geometry'):
-                            (inn if m.get('role') == 'inner' else au).append([(q['lon'], q['lat']) for q in m['geometry']])
-                    ringe = []
-                    for lst, rolle in ((au, 'o'), (inn, 'i')):
-                        for cc, zu in ketten(lst, False):
-                            if not zu or len(cc) < 4: continue
-                            lo, la = np.array(cc).T; x, y = geb.to_m(lo, la)
-                            P = dp_ring(np.c_[x, y], 3)
-                            if len(P) >= 3: ringe.append((rolle, P))
-                    outs = [P for r, P in ringe if r == 'o']
-                    if not outs: continue
-                    polys = [[P] for P in outs]
-                    for r, P in ringe:
-                        if r == 'i':
-                            for pl in polys:
-                                if im_poly(P[0], pl[0]): pl.append(P); break
-                    for k, pl in enumerate(polys):
-                        g = dict(f); g['t'] = 'P'; g['g'] = [flat(R) for R in pl]
-                        if k: g['osm'] = f'{uid}.{k}'
-                        feats.append(g)
-                    continue
-                else:
-                    continue
-                feats.append(f)
+    zu_m = lambda l: np.c_[geb.to_m(*np.array([c[:2] for c in l]).T)]
+    for el in osm:
+        t = dict(el.get('properties', {})); g = el.get('geometry') or {}
+        uid = f"{str(t.pop('@type', 'x'))[:1]}{t.pop('@id', '')}"
+        if (uid, g.get('type')) in seen:
+            continue
+        seen.add((uid, g.get('type')))
+        c = klasse(t)
+        if t.get('natural') in ('peak', 'cape'): c = 'place'
+        if c == 'other':
+            continue
+        h, hs = hoehe_von(c, t, std)
+        f = dict(c=c, osm=uid)
+        if t.get('name'): f['n'] = t['name']
+        if h: f['h'] = round(h, 1); f['hs'] = hs
+        sub = t.get('highway') or t.get('place') or t.get('landuse') or t.get('natural') or t.get('man_made') or t.get('leisure') or t.get('waterway')
+        if sub: f['s'] = sub
+        typ = g.get('type')
+        if typ == 'Point':
+            if c in ('road', 'path', 'building', 'forest', 'farmland', 'grass', 'urban'):
+                continue   # Knoten auf Wegen/Flächen (z. B. Übergänge) weglassen
+            x, y = geb.to_m(*g['coordinates'][:2])
+            f['t'] = 'N'; f['g'] = [int(round(float(x))), int(round(float(y)))]
+            feats.append(f)
+        elif typ in ('LineString', 'MultiLineString'):
+            for k, l in enumerate([g['coordinates']] if typ == 'LineString' else g['coordinates']):
+                if len(l) < 2: continue
+                P = dp(zu_m(l), 2)
+                h2 = dict(f, t='L', g=flat(P))
+                if k: h2['osm'] = f'{uid}.{k}'
+                feats.append(h2)
+        elif typ in ('Polygon', 'MultiPolygon'):
+            for k, pl in enumerate(ringe_von(g)):
+                rr = []
+                for r in pl:
+                    if len(r) < 4: continue
+                    P = dp_ring(zu_m(r), 1.5 if c == 'building' else 3)
+                    if len(P) >= 3: rr.append(flat(P))
+                if not rr: continue
+                h2 = dict(f, t='P', g=rr)
+                if k: h2['osm'] = f'{uid}.{k}'
+                feats.append(h2)
     # grob auf Revier (+800 m) beschränken
     def drin(f):
         g = f['g']
@@ -776,12 +774,13 @@ def main():
     log(f'Revier {cfg["name"]}: {geb.W / 1000:.1f} × {geb.H / 1000:.1f} km, Ursprung UTM33 {geb.ox} / {geb.oy}')
     netz = Netz(a.cache, a.offline)
 
-    teile, land, wf = kueste(netz, geb, cfg)
+    osm = osm_daten(netz, geb, cfg, not a.ohne_umgebung)
+    teile, land, wf = kueste(osm['kueste'], geb, cfg)
     mim = maske(teile, geb.W, geb.H, cfg['maske'])
     cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim)
-    pkt, lin = seezeichen(netz, geb)
+    pkt, lin = seezeichen(osm['seezeichen'], geb)
     std = dict(gebaeude=8.0, wald=15.0)
-    env = [] if a.ohne_umgebung else umgebung(netz, geb, std)
+    env = [] if a.ohne_umgebung else umgebung(osm['umgebung'], geb, std)
 
     o84 = geb.to_ll(0, 0); n84 = geb.to_ll(geb.W, geb.H)
     rnd = lambda P: [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in P]

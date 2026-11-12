@@ -13,16 +13,17 @@ Lokal testen: `python3 -m http.server 8080` im Ordner, dann http://localhost:808
 Für große Küstenreviere lädt nicht der Browser die Daten, sondern ein Skript baut sie einmal fertig auf.
 1. Dateien hochladen, auch den Ordner `.github/workflows/` mit `revier.yml` (GitHub verlangt genau diesen Ordner, sonst gibt es keine Action).
 2. Reiter **Actions** → **Revier bauen** → **Run workflow** → Revier `hiddensee` → Start. Dauer ca. 5–20 Minuten.
+   Heruntergeladene Daten werden zwischengespeichert; ein weiterer Lauf nutzt sie wieder. Für frische OSM-/Tiefendaten beim Start den Haken **neu_laden** setzen.
 3. Danach liegen im Hauptordner: `hiddensee-revier.json`, `hiddensee-gelaende.bin`, `hiddensee-umgebung.json`, `hiddensee-maske.png`, `hiddensee-vorschau.png`, `hiddensee-namensnennung.txt`. Die Zusammenfassung des Laufs (mit Vorschaubild und Warnungen) steht in der Action.
 4. Anschauen: `revierkarte.html` (bzw. `revierkarte.html?r=hiddensee`). Ziehen, Mausrad/zwei Finger zum Zoomen, Tippen zeigt Position und Tiefe/Höhe, „📏 Messen“ misst Strecken in Seemeilen, „☰ Ebenen“ schaltet Tiefen, Tiefenlinien, Gelände, Umgebung, Gebäude, Seezeichen, Namen.
 
-**Quellen:** Küste, Umgebung, Seezeichen aus OpenStreetMap/OpenSeaMap (Overpass); Wassertiefe EMODnet DTM (WCS, ca. 115 m, CC BY 4.0); Gelände Copernicus DEM GLO-30 (30 m, Oberflächenmodell). Wasser = Revier-Rechteck minus Land aus der OSM-Küstenlinie (`natural=coastline`, Land liegt links), deshalb sind Bodden und Strelasund automatisch dabei.
+**Quellen:** Küste, Umgebung, Seezeichen aus OpenStreetMap/OpenSeaMap – der Landesauszug Mecklenburg-Vorpommern von Geofabrik wird einmal geladen und mit `osmium` auf das Revier zugeschnitten (keine Overpass-Abfragen, die bei Überlast hängen); Wassertiefe EMODnet DTM (WCS, ca. 115 m, CC BY 4.0); Gelände Copernicus DEM GLO-30 (30 m, Oberflächenmodell). Wasser = Revier-Rechteck minus Land aus der OSM-Küstenlinie (`natural=coastline`, Land liegt links), deshalb sind Bodden und Strelasund automatisch dabei.
 
 **Formate** (UTM 33, Meter, Ursprung Südwest-Ecke wie beim Spiel-Export):
 - `-revier.json` (`seekoje-revier-1`): `water` (je Teil `outer` gegen, `islands` im Uhrzeigersinn), `land`, `seamarks` (Typ, Name, Farbe, Form, Kennung, x/y), `seamark_lines`, `grid`, `mask`, `attribution`, `warnungen`.
 - `-gelaende.bin`: int16 little-endian, Zentimeter (unter 0 = Wassertiefe, über 0 = Geländehöhe), 20-m-Raster, Zeile 0 = Norden. Tiefen sind aus dem 115-m-Raster interpoliert und am Ufer auf max. 10 % Neigung geglättet (`hang`).
 - `-umgebung.json` (`seekoje-umgebung-1`): Klassen wie im Editor plus `place`, `lighthouse`, `pier`, `cliff`; Geometrien als flache Meter-Listen.
-- Neues Revier: Eintrag in `REVIERE` oben in `revier_bauen.py` ergänzen (Name, Länge/Breite-Box).
+- Neues Revier: Eintrag in `REVIERE` oben in `revier_bauen.py` ergänzen (Name, Länge/Breite-Box, passender Geofabrik-Auszug unter `osm`, z. B. `…/germany/sachsen-latest.osm.pbf`).
 
 **KEINE Navigationskarte.** Tiefen sind grob und haben keinen bekannten Stand.
 
