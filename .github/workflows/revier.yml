@@ -50,5 +50,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
           git add -A -- ":(glob)${REVIER}-*"
-          git commit -m "Revier $REVIER neu gebaut" || echo "Keine Änderungen"
-          git push
+          git commit -m "Revier $REVIER neu gebaut" || { echo "Keine Änderungen"; exit 0; }
+          for i in 1 2 3; do
+            git pull --rebase -X theirs origin main && git push && exit 0
+            echo "Push fehlgeschlagen, neuer Versuch in 10 s …"; sleep 10
+          done
+          exit 1
