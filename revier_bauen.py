@@ -488,15 +488,16 @@ def maske(teile, W, H, cs):
 
 
 # ------------------------------------------------------------------ GeoTIFF lesen (tifffile)
-def geotiff(daten):
+def geotiff(daten, grenzen=None):
+    """GeoTIFF in Länge/Breite lesen. Unterstützt PixelScale+Tiepoint, ModelTransformation
+    und als Notlösung die angefragten Grenzen (w, s, e, n)."""
     import tifffile
     with tifffile.TiffFile(io.BytesIO(daten)) as tf:
         pg = tf.pages[0]; a = pg.asarray().astype(np.float64)
         if a.ndim == 3:
             a = a[..., 0] if a.shape[-1] < a.shape[0] else a[0]
         tg = pg.tags
-        sx, sy = tg['ModelPixelScaleTag'].value[:2]
-        tp = tg['ModelTiepointTag'].value; i0, j0, x0, y0 = tp[0], tp[1], tp[3], tp[4]
+        namen = sorted(t.name for t in tg.values())
         punkt = False
         if 'GeoKeyDirectoryTag' in tg:
             g = tg['GeoKeyDirectoryTag'].value
@@ -509,11 +510,30 @@ def geotiff(daten):
                 nod = float(str(tg['GDAL_NODATA'].value).strip('\x00 '))
             except ValueError:
                 pass
+        ny, nx = a.shape
+        if 'ModelPixelScaleTag' in tg and 'ModelTiepointTag' in tg:
+            sx, sy = tg['ModelPixelScaleTag'].value[:2]
+            tp = tg['ModelTiepointTag'].value; i0, j0, x0, y0 = tp[0], tp[1], tp[3], tp[4]
+            ecke_lon, ecke_lat = x0 - i0 * sx, y0 + j0 * sy
+        elif 'ModelTransformationTag' in tg:
+            m = tg['ModelTransformationTag'].value          # lon = m0*col + m1*row + m3 ; lat = m4*col + m5*row + m7
+            if abs(m[1]) > 1e-12 or abs(m[4]) > 1e-12:
+                raise ValueError('gedrehtes Raster wird nicht unterstützt')
+            sx, sy = m[0], -m[5]; ecke_lon, ecke_lat = m[3], m[7]
+        elif grenzen:
+            w, s, e, n = grenzen
+            sx, sy = (e - w) / nx, (n - s) / ny; ecke_lon, ecke_lat = w, n; punkt = False
+            warn(f'GeoTIFF ohne Lageangabe (Tags: {", ".join(namen)}) – Lage aus angefragtem Ausschnitt berechnet (±1 Pixel)')
+        else:
+            raise ValueError('keine Lageangabe im GeoTIFF, Tags: ' + ', '.join(namen))
+        if sy < 0:      # Zeilen von Süd nach Nord
+            a = a[::-1]; ecke_lat = ecke_lat + (-sy) * ny; sy = -sy
     if nod is not None:
         a[a == nod] = np.nan
     a[~np.isfinite(a)] = np.nan
-    # Pixelmittelpunkt-Koordinaten: lon = lon0 + (col)*sx, lat = lat0 - (row)*sy
-    lon0 = x0 - i0 * sx + (0 if punkt else sx / 2); lat0 = y0 + j0 * sy - (0 if punkt else sy / 2)
+    a[np.abs(a) > 20000] = np.nan
+    # Pixelmittelpunkt-Koordinaten: lon = lon0 + col*sx, lat = lat0 - row*sy
+    lon0 = ecke_lon + (0 if punkt else sx / 2); lat0 = ecke_lat - (0 if punkt else sy / 2)
     return dict(a=a, lon0=lon0, lat0=lat0, sx=sx, sy=sy)
 
 
@@ -564,7 +584,8 @@ def gelaende(netz, geb, cfg, wasser_im):
         'SUBSET': [f'Lat({s:.5f},{n:.5f})', f'Long({w:.5f},{e:.5f})'], 'FORMAT': 'image/tiff'})
     if d:
         try:
-            r = geotiff(d); tiefe = abtasten(r, lon, lat)
+            r = geotiff(d, (w, s, e, n)); tiefe = abtasten(r, lon, lat)
+            log(f'  EMODnet: {r["a"].shape[1]}×{r["a"].shape[0]} Pixel, {np.isfinite(r["a"]).mean() * 100:.0f} % mit Werten')
             sw = tiefe[wm & np.isfinite(tiefe)]
             if sw.size and np.median(sw) > 0:
                 tiefe = -tiefe; log('  Vorzeichen umgedreht (Tiefen positiv geliefert)')
