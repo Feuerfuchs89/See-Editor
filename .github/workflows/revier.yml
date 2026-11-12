@@ -1,0 +1,34 @@
+# Baut ein Küstenrevier (Karte + Spieldaten) aus offenen Daten und legt die Dateien im Hauptordner ab.
+# Start: GitHub → Reiter „Actions“ → „Revier bauen“ → „Run workflow“.
+name: Revier bauen
+on:
+  workflow_dispatch:
+    inputs:
+      revier:
+        description: 'Revier (Schlüssel in revier_bauen.py)'
+        required: true
+        default: 'hiddensee'
+permissions:
+  contents: write
+jobs:
+  bauen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      REVIER: ${{ inputs.revier }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pakete installieren
+        run: pip install numpy scipy requests pillow tifffile imagecodecs
+      - name: Revier bauen
+        run: python revier_bauen.py "$REVIER"
+      - name: Ergebnis einchecken
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add "$REVIER"-revier.json "$REVIER"-gelaende.bin "$REVIER"-umgebung.json "$REVIER"-maske.png "$REVIER"-vorschau.png "$REVIER"-namensnennung.txt
+          git commit -m "Revier $REVIER neu gebaut" || echo "Keine Änderungen"
+          git push
