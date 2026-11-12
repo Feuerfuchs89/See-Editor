@@ -332,13 +332,121 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
             log(f'  WARNUNG Bahn {key}: zu wenig freies Wasser ({frei:.0f} m) – weggelassen'); continue
         kurse[key] = dict(name=b['name'], center=[round(p[0]), round(p[1])], frei_m=int(frei), bahn=True)
         log(f'  Bahn {b["name"]}: Freiraum {frei:.0f} m')
+    # --- Feuer (echte Kennung) und Leuchttürme
+    STD_H = {'buoy': 2.5, 'beacon': 5.0, 'light_minor': 8.0, 'light_major': 15.0, 'landmark': 15.0, 'light_float': 6.0, 'light_vessel': 10.0, 'platform': 10.0}
+    tuerme = []
+    for f_ in env:
+        ist_lt = f_.get('c') == 'lighthouse' or (f_.get('c') == 'building' and f_.get('s') == 'lighthouse') or \
+            (f_.get('c') in ('tower', 'building') and 'Peilturm' in (f_.get('n') or ''))
+        if not ist_lt:
+            continue
+        if f_.get('t') == 'N':
+            x, y = f_['g'][0], f_['g'][1]
+        elif f_.get('t') == 'P':
+            g = f_['g'][0]; x, y = sum(g[0::2]) / (len(g) // 2), sum(g[1::2]) / (len(g) // 2)
+        else:
+            continue
+        if any(math.hypot(x - q[0], y - q[1]) < 15 for q in tuerme):
+            continue
+        tuerme.append([int(round(x)), int(round(y)), f_.get('n', ''), round(float(f_.get('h') or 0), 1)])
+    feuer = []
+    for s_ in meta['seamarks']:
+        fd = s_.get('feuer')
+        if not fd:
+            continue
+        typ = s_.get('typ', ''); hs = None
+        try:
+            hs = float(str(s_.get('hoehe', '')).replace('m', '').replace(',', '.')) if s_.get('hoehe') else None
+        except ValueError:
+            hs = None
+        h = fd.get('h') or hs or next((v for k, v in STD_H.items() if typ.startswith(k)), 4.0)
+        feuer.append(dict(x=round(s_['x']), y=round(s_['y']), h=round(float(h), 1), typ=typ, name=s_.get('name', ''), f=fd))
+        # Feuer auf Bauwerk ohne eigenen Leuchtturm-Eintrag: kleinen Turm vorsehen
+        if (typ.startswith('light') or typ == 'landmark') and not any(math.hypot(s_['x'] - q[0], s_['y'] - q[1]) < 40 for q in tuerme):
+            tuerme.append([round(s_['x']), round(s_['y']), s_.get('name', ''), round(float(hs or fd.get('h') or 10), 1)])
+    # bekannte Leuchttürme/Feuer, die in OSM fehlen oder anders eingetragen sind (Recherche: Lighthouse Directory)
+    for ex in cfg.get('feuer_extra', []):
+        ex_x, ex_y = ll2m(*ex['pos'])
+        if ex.get('turm') and not any(math.hypot(ex_x - q[0], ex_y - q[1]) < 60 for q in tuerme):
+            tuerme.append([round(ex_x), round(ex_y), ex['name'], ex.get('turm')])
+        if ex.get('f') and not any(math.hypot(ex_x - q['x'], ex_y - q['y']) < 150 and q['f'].get('c') for q in feuer):
+            feuer.append(dict(x=round(ex_x), y=round(ex_y), h=ex.get('h', 30), typ='light_major', name=ex['name'], f=ex['f'], quelle='Recherche'))
+    log(f'  {len(feuer)} Feuer mit Kennung, {len(tuerme)} Leuchttürme/Feuerträger')
+    # --- Hafen-Ausschnitte (4 m)
+    haefen = []
+    for alt in glob.glob(os.path.join(aus, f'{r}-spiel-hafen-*.bin')):
+        os.remove(alt)
+    for hn, hf in enumerate(cfg.get('haefen', [])):
+        hcs = 4; S_ = hf.get('groesse', 2400)
+        cx, cy = ll2m(*hf['mitte'])
+        x0 = math.floor((cx - S_ / 2) / gcs) * gcs; y0 = math.floor((cy - S_ / 2) / gcs) * gcs
+        if x0 < 0 or y0 < 0 or x0 + S_ > W or y0 + S_ > H:
+            log(f'  WARNUNG Hafen {hf["name"]}: außerhalb des Reviers'); continue
+        n_ = S_ // hcs; y1 = y0 + S_
+        toP = lambda x, y: ((x - x0) / hcs, (y1 - y) / hcs)
+        mk = Image.new('L', (n_, n_), 0); dm = ImageDraw.Draw(mk)
+        for ring in meta['land']:
+            xs = [q[0] for q in ring]; ys = [q[1] for q in ring]
+            if max(xs) < x0 or min(xs) > x0 + S_ or max(ys) < y0 or min(ys) > y1:
+                continue
+            dm.polygon([toP(q[0], q[1]) for q in ring], fill=1)
+        stege = []
+        BREITE = {'pier': 3.5, 'breakwater': 7.0, 'groyne': 3.0, 'quay': 0}
+        for f_ in env:
+            if f_.get('c') != 'pier' or f_.get('s') == 'coastline':
+                continue
+            k_ = f_.get('s') if f_.get('s') in BREITE else 'pier'
+            if f_.get('t') == 'L':
+                g = f_['g']; xs, ys = g[0::2], g[1::2]
+            elif f_.get('t') == 'P':
+                g = f_['g'][0]; xs, ys = g[0::2], g[1::2]
+            else:
+                continue
+            if max(xs) < x0 or min(xs) > x0 + S_ or max(ys) < y0 or min(ys) > y1:
+                continue
+            pts = [toP(a_, b_) for a_, b_ in zip(xs, ys)]
+            if f_['t'] == 'P' and len(pts) >= 3:
+                dm.polygon(pts, fill=2); stege.append(dict(k=k_, t='P', g=f_['g'][0]))
+            elif f_['t'] == 'L' and BREITE[k_] > 0 and len(pts) >= 2:
+                dm.line(pts, fill=2, width=max(1, int(round(BREITE[k_] / hcs)))); stege.append(dict(k=k_, t='L', w=BREITE[k_], g=g))
+        msk = np.asarray(mk).astype(np.uint8).copy()
+        # Kaimauern: Landkante in Hafennähe (nahe Stegen/Molen oder Hafen-Objekten) → Typ 3, 2 Zellen breit
+        nah = np.zeros_like(msk, bool)
+        if (msk == 2).any():
+            nah |= ndimage.distance_transform_edt(msk != 2) * hcs < 250
+        hm = Image.new('L', (n_, n_), 0); dh = ImageDraw.Draw(hm); rr = 300 / hcs
+        for f_ in env:
+            if f_.get('c') != 'harbor':
+                continue
+            g = f_['g']; xs, ys = (([g[0]], [g[1]]) if f_['t'] == 'N' else (g[0][0::2], g[0][1::2]) if f_['t'] == 'P' else (g[0::2], g[1::2]))
+            px, py = toP(sum(xs) / len(xs), sum(ys) / len(ys))
+            if -rr < px < n_ + rr and -rr < py < n_ + rr:
+                dh.ellipse([px - rr, py - rr, px + rr, py + rr], fill=1)
+        nah |= np.asarray(hm) > 0
+        wasser = msk == 0
+        kante = (msk == 1) & ndimage.binary_dilation(wasser, iterations=2)
+        msk[kante & nah] = 3
+        jj, ii = np.mgrid[0:n_, 0:n_]
+        Xc = x0 + (ii + 0.5) * hcs; Yc = y1 - (jj + 0.5) * hcs
+        fx = Xc / cs - 0.5; fy = (H - Yc) / cs - 0.5; i0 = np.clip(np.floor(fx).astype(int), 0, Zn.shape[1] - 2); j0 = np.clip(np.floor(fy).astype(int), 0, Zn.shape[0] - 2)
+        tx = fx - i0; ty = fy - j0
+        zc = (Zn[j0, i0] * (1 - tx) + Zn[j0, i0 + 1] * tx) * (1 - ty) + (Zn[j0 + 1, i0] * (1 - tx) + Zn[j0 + 1, i0 + 1] * tx) * ty
+        tief = hf.get('tiefe', 3.0)
+        z = np.where(msk == 0, np.minimum(zc, -tief), np.where(msk == 2, 1.8, np.where(msk == 3, np.maximum(zc, 1.9), np.maximum(zc, 1.6))))
+        rand = np.zeros_like(msk, bool); rand[:2, :] = rand[-2:, :] = rand[:, :2] = rand[:, -2:] = True
+        z = np.where(rand, zc, z)                       # Rand passt zum groben Gelände
+        zcm = np.clip(np.round(z * 100), -32767, 32767).astype('<i2')
+        name = f'{r}-spiel-hafen-{hn}.bin'
+        open(os.path.join(aus, name), 'wb').write(zlib.compress(b'RKH1' + struct.pack('<iiHH', int(x0), int(y0), hcs, n_) + zcm.tobytes() + msk.tobytes(), 9))
+        haefen.append(dict(name=hf['name'], file=name, x0=int(x0), y0=int(y0), cs=hcs, n=int(n_), stege=stege))
+        log(f'  Hafen {hf["name"]}: {S_ / 1000:.1f} km, {len(stege)} Molen/Stege, {(msk == 0).mean() * 100:.0f} % Wasser')
     index = dict(format='regattakoje-revier-2', revier=r, name=cfg.get('spielname', meta['name']), attribution=meta['attribution'],
                  hinweis='Vereinfachte Regattabahnen entlang tiefem Wasser laut Datensatz. Keine Navigationskarte.',
                  origin_utm=meta['origin_utm'], size=meta['size'],
                  grid=dict(cs=gcs, nx=nx, ny=ny, tile=T, tiles=kacheln, tile_format='RKT1: <HHI nx,ny,nhaus> z int16 cm, landnutzung uint8, landabstand uint8, haeuser int16[6] (x,y m ab SW der Kachel, l*10, b*10, winkel*1000, h*10); zlib'),
                  overview=dict(file=uebersicht, cs=gcs * 2, nx=nxo, ny=nyo, format='z int16 cm, landnutzung uint8; zlib'),
                  lu_klassen={'1': 'Wald', '2': 'Ort', '3': 'Acker', '4': 'Strand', '5': 'Feuchtgebiet', '6': 'Gebüsch', '7': 'Wiese'},
-                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse)
+                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen)
     json.dump(index, open(os.path.join(aus, f'{r}-spiel.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     gr = sum(os.path.getsize(os.path.join(aus, k[2])) for k in kacheln)
     log(f'  Spieldaten: Index {os.path.getsize(os.path.join(aus, f"{r}-spiel.json")) / 1e6:.1f} MB, Übersicht {os.path.getsize(os.path.join(aus, uebersicht)) / 1e6:.1f} MB, Kacheln zusammen {gr / 1e6:.1f} MB')

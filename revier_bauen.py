@@ -73,6 +73,22 @@ REVIERE['ruegen']['bahnen'] = {
     'bahn_gb': dict(name='Regattabahn Greifswalder Bodden', nahe=(13.55, 54.20), r=7000),
     'bahn_pr': dict(name='Regattabahn Prorer Wiek (vor Binz)', nahe=(13.66, 54.43), r=4000),
 }
+# Leuchtfeuer, die in OSM fehlen könnten (Angaben: Lighthouse Directory, ibiblio.org/lighthouse)
+REVIERE['ruegen']['feuer_extra'] = [
+    dict(name='Leuchtfeuer Arkona', pos=(13.43266, 54.67954), turm=35, h=75,
+         f=dict(c='Fl', g='3', p=17, s='0.3+(3.7),0.3+(3.7),0.3+(8.7)', k='white', r=22)),
+    dict(name='Greifswalder Oie', pos=(13.92401, 54.24898), turm=39, h=49,
+         f=dict(c='Fl', p=3.8, s='0.3+(3.5)', k='white', r=22)),
+    dict(name='Dornbusch', pos=(13.11941, 54.59913), h=95,
+         f=dict(c='LFl', p=10, s='2.4+(7.6)', k='white', r=24)),
+]
+# Häfen mit feinem Ausschnitt (4 m) für Kais, Molen und Stege
+REVIERE['ruegen']['haefen'] = [
+    dict(name='Stralsund', mitte=(13.09864, 54.31611), groesse=2800),
+    dict(name='Sassnitz', mitte=(13.64112, 54.50949), groesse=2400),
+    dict(name='Mukran (Fährhafen Sassnitz)', mitte=(13.58957, 54.48149), groesse=2400),
+    dict(name='Peenemünde', mitte=(13.76263, 54.14229), groesse=2800),
+]
 
 EMODNET_WCS = 'https://ows.emodnet-bathymetry.eu/wcs'
 COP30 = 'https://copernicus-dem-30m.s3.amazonaws.com/{n}/{n}.tif'
@@ -665,6 +681,40 @@ def gelaende(netz, geb, cfg, wasser_im):
 
 
 # ------------------------------------------------------------------ Seezeichen
+def feuer_def(t):
+    """Alle Feuer-Angaben aus OpenSeaMap-Tags (seamark:light…) kompakt: Kennung, Gruppe, Periode, Folge, Farbe, Reichweite, Höhe, Sektoren."""
+    L = {k[len('seamark:light:'):]: v for k, v in t.items() if k.startswith('seamark:light:')}
+    if not L:
+        return None
+    num = lambda v: (float(str(v).replace(',', '.').split(';')[0].split()[0]) if v not in (None, '') else None)
+    def eins(pre):
+        g = lambda k: L.get(pre + k)
+        d = dict(c=g('character'), g=g('group'), p=g('period'), s=g('sequence'), k=g('colour'), r=g('range'), h=g('height'),
+                 a=g('sector_start'), e=g('sector_end'), o=g('orientation'), cat=g('category'))
+        out = {}
+        for k_, v in d.items():
+            if v in (None, ''):
+                continue
+            if k_ in ('p', 'r', 'h', 'a', 'e', 'o'):
+                try:
+                    out[k_] = num(v)
+                except ValueError:
+                    pass
+            else:
+                out[k_] = str(v)[:40]
+        return out
+    f = eins('')
+    sek = []
+    for n in range(1, 25):
+        if any(k.startswith(f'{n}:') for k in L):
+            x = eins(f'{n}:')
+            if x:
+                sek.append(x)
+    if sek:
+        f['sek'] = sek
+    return f if (f.get('c') or sek) else None
+
+
 def seezeichen(feats, geb):
     log('Seezeichen verarbeiten …')
     pkt, lin = [], []
@@ -676,19 +726,31 @@ def seezeichen(feats, geb):
             form=p('shape'), kategorie=p('category'), toppzeichen=t.get('seamark:topmark:shape', ''),
             licht=' '.join(x for x in (t.get('seamark:light:character', ''), t.get('seamark:light:colour', ''),
                                        (t.get('seamark:light:period', '') + 's') if t.get('seamark:light:period') else '') if x),
-            osm=f"{str(t.get('@type', 'x'))[:1]}{t.get('@id', '')}").items() if v}
+            hoehe=t.get('height', ''), osm=f"{str(t.get('@type', 'x'))[:1]}{t.get('@id', '')}").items() if v}
+        fd = feuer_def(t)
+        if fd:
+            info['feuer'] = fd
         if g.get('type') == 'Point':
             x, y = geb.to_m(*g['coordinates'][:2])
             if 0 <= x <= geb.W and 0 <= y <= geb.H:
                 pkt.append({**info, 'x': round(float(x), 1), 'y': round(float(y), 1)})
-        else:
-            linien = [g['coordinates']] if g.get('type') == 'LineString' else g.get('coordinates', []) if g.get('type') == 'MultiLineString' \
-                else [pl[0] for pl in ringe_von(g)]
-            for l in linien:
-                if len(l) < 2: continue
-                lo, la = np.array([c[:2] for c in l]).T; x, y = geb.to_m(lo, la)
-                lin.append({**info, 'p': [[round(a, 1), round(b, 1)] for a, b in zip(x.tolist(), y.tolist())]})
-    log(f'  {len(pkt)} Seezeichen, {len(lin)} Linien/Flächen')
+            continue
+        linien = [g['coordinates']] if g.get('type') == 'LineString' else g.get('coordinates', []) if g.get('type') == 'MultiLineString' \
+            else [pl[0] for pl in ringe_von(g)]
+        flaechig = g.get('type') in ('Polygon', 'MultiPolygon')
+        for l in linien:
+            if len(l) < 2:
+                continue
+            lo, la = np.array([c[:2] for c in l]).T; x, y = geb.to_m(lo, la)
+            # Feuer, Leuchttürme und Landmarken auf Gebäudeflächen/Wegen auch als Punkt (Schwerpunkt) übernehmen
+            if fd or typ.startswith('light') or typ == 'landmark' or flaechig and typ in ('beacon_lateral', 'beacon_special_purpose', 'beacon_cardinal'):
+                cx, cy = float(np.mean(x)), float(np.mean(y))
+                if 0 <= cx <= geb.W and 0 <= cy <= geb.H:
+                    pkt.append({**info, 'x': round(cx, 1), 'y': round(cy, 1), 'aus': 'flaeche'})
+                if flaechig:
+                    continue
+            lin.append({**info, 'p': [[round(a, 1), round(b, 1)] for a, b in zip(x.tolist(), y.tolist())]})
+    log(f'  {len(pkt)} Seezeichen ({sum(1 for q in pkt if "feuer" in q)} mit Feuer), {len(lin)} Linien/Flächen')
     return pkt, lin
 
 
