@@ -41,7 +41,37 @@ REVIERE = {
         hang=0.10,       # max. Unterwasser-Neigung am Ufer (Glättung der 115-m-Tiefen), 0 = aus
         osm='https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
         regatten=['Blaues Band vom Strelasund (Stralsund → Neuendorf/Hiddensee)', 'Rund Hiddensee'],
+        spiel=dict(zelle=40, kachel=400),
     ),
+    'ruegen': dict(
+        name='Rügen · Hiddensee · Strelasund · Greifswalder Bodden · Peenestrom',
+        spielname='Rügen · Bodden · Peenestrom',
+        # ganze Insel mit Hiddensee, Stralsund, Greifswalder Bodden, Greifswalder Oie, Wolgast/Peenemünde
+        bbox=(12.95, 54.03, 13.95, 54.71),
+        zelle=40, maske=10, ufer_tol=1.5, hang=0.10,
+        umgebung_schlank=True,   # Revierkarte ohne Gebäude/Fußwege (Gebäude in <r>-gebaeude.json und in den Spielkacheln)
+        osm='https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
+        regatten=['Blaues Band vom Strelasund', 'Rund Hiddensee'],
+        spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
+    ),
+}
+
+# Fertige Kurse (Länge/Breite) – die Bahn wird automatisch durch Wasser ab 1,5 m gelegt
+KURSE_HIDDENSEE = {
+    'bb': dict(name='Blaues Band vom Strelasund', kurz='Stralsund → Neuendorf',
+               start=(13.10359, 54.32544), ziel=(13.09998, 54.52368), ziel_name='Ziel Neuendorf (Hiddensee)'),
+    'rund': dict(name='Rund Hiddensee', kurz='Neuendorf → Gellenstrom → Westseite → Dornbusch → Libben → Neuendorf',
+                 start=(13.10196, 54.52084), start_r=800,
+                 anker=[(13.05774, 54.46944), (13.03755, 54.53653), (13.12619, 54.62602), (13.17356, 54.60607)],
+                 ziel=(13.09998, 54.52368), ziel_name='Ziel Neuendorf (Hiddensee)'),
+}
+REVIERE['hiddensee']['kurse'] = KURSE_HIDDENSEE
+REVIERE['hiddensee']['bahnen'] = {'bahn': dict(name='Regattabahn vor Hiddensee (Westseite)', nahe=(13.01378, 54.54522), r=4000)}
+REVIERE['ruegen']['kurse'] = KURSE_HIDDENSEE
+REVIERE['ruegen']['bahnen'] = {
+    'bahn': dict(name='Regattabahn vor Hiddensee (Westseite)', nahe=(13.01378, 54.54522), r=4000),
+    'bahn_gb': dict(name='Regattabahn Greifswalder Bodden', nahe=(13.55, 54.20), r=7000),
+    'bahn_pr': dict(name='Regattabahn Prorer Wiek (vor Binz)', nahe=(13.66, 54.43), r=4000),
 }
 
 EMODNET_WCS = 'https://ows.emodnet-bathymetry.eu/wcs'
@@ -834,6 +864,15 @@ def main():
     json.dump(meta, open(P('revier.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     open(P('gelaende.bin'), 'wb').write(cm.tobytes())
     mim.convert('1').save(P('maske.png'), optimize=True)
+    env_alle = env
+    if cfg.get('umgebung_schlank'):
+        geb_feats = [f for f in env if f['c'] == 'building']
+        env = [f for f in env if f['c'] not in ('building', 'path')]
+        json.dump(dict(format='seekoje-gebaeude-1', revier=r, attribution=ATTRIBUTION[:1], features=geb_feats),
+                  open(P('gebaeude.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+        log(f'  Gebäude separat: {len(geb_feats)} (für Spielkacheln)')
+        meta['environment']['count'] = len(env); meta['environment']['ohne'] = 'Gebäude und Fußwege (siehe ' + f'{r}-gebaeude.json)'
+        json.dump(meta, open(P('revier.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     json.dump(dict(format='seekoje-umgebung-1', revier=r, attribution=ATTRIBUTION[:1],
                    legende='t: N=Punkt [x,y], L=Linie [x,y,x,y…], P=Fläche [[Außenring],[Loch]…] als flache Listen in m; '
                            'c=Klasse, s=OSM-Unterart, n=Name, h=Höhe m, hs=Höhenquelle',
@@ -844,6 +883,13 @@ def main():
         f'Revier {cfg["name"]} – Datenquellen (im Spiel sichtbar nennen)\n\n' + '\n'.join(ATTRIBUTION) +
         '\n\nHinweise:\n- OpenStreetMap: Die Revierdateien sind eine abgeleitete Datenbank (ODbL 1.0). Bilder/Spielszenen daraus sind „Produced Work“ und brauchen die Nennung.\n'
         '- EMODnet und Copernicus DEM: Namensnennung nötig.\n- KEINE Navigationskarte. Keine Rechtsberatung.\n')
+    if cfg.get('spiel'):
+        import revier_spiel
+        try:
+            revier_spiel.export(r, cfg, meta, cm, cfg['zelle'], env_alle, a.aus, utm, geo)
+        except Exception as ex:
+            warn(f'Spielexport fehlgeschlagen: {ex}')
+            import traceback; traceback.print_exc()
     gr = {s: os.path.getsize(P(s)) for s in ('revier.json', 'gelaende.bin', 'umgebung.json', 'maske.png', 'vorschau.png')}
     log('Fertig: ' + ', '.join(f'{r}-{k} {v / 1e6:.1f} MB' for k, v in gr.items()))
     zs = os.environ.get('GITHUB_STEP_SUMMARY')

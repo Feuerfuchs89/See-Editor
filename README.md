@@ -9,10 +9,17 @@ Webapp (PWA) für Gewässer- und Regattastrecken. Keine Navigationssoftware. All
 
 Lokal testen: `python3 -m http.server 8080` im Ordner, dann http://localhost:8080.
 
-## Küstenrevier bauen (Hiddensee · Kubitzer Bodden · Strelasund)
+## Küstenreviere: `ruegen` (ganze Insel, Hiddensee, Strelasund, Greifswalder Bodden, Peenestrom) und `hiddensee`
+Das Revier `ruegen` (ca. 65 × 75 km) ist der Standard. Neben den Kartendateien entstehen die **Spieldaten für die Regattakoje**:
+`ruegen-spiel.json` (Index mit Kursen), `ruegen-spiel-uebersicht.bin` (ganzes Revier grob) und `ruegen-spiel-k-II-JJ.bin` (16-km-Kacheln fein).
+Das Spiel lädt sie direkt von dieser Seite (`../See-Editor/`) und holt Kacheln nur rund um die Boote – nach einem Neubau muss im Spiel nichts kopiert werden.
+Gebäude stehen beim großen Revier in `ruegen-gebaeude.json` (nicht in der Revierkarte, aber in den Spielkacheln). Revierkarte: `revierkarte.html?r=ruegen`.
+Nur den Spielteil neu erzeugen (ohne Downloads, aus vorhandenen Dateien): `python revier_spiel.py ruegen`.
+
+### Ablauf
 Für große Küstenreviere lädt nicht der Browser die Daten, sondern ein Skript baut sie einmal fertig auf.
 1. Dateien hochladen, auch den Ordner `.github/workflows/` mit `revier.yml` (GitHub verlangt genau diesen Ordner, sonst gibt es keine Action).
-2. Reiter **Actions** → **Revier bauen** → **Run workflow** → Revier `hiddensee` → Start. Dauer ca. 5–20 Minuten.
+2. Reiter **Actions** → **Revier bauen** → **Run workflow** → Revier `ruegen` (oder `hiddensee`) → Start. Dauer etwa 5–25 Minuten.
    Heruntergeladene Daten werden zwischengespeichert; ein weiterer Lauf nutzt sie wieder. Für frische OSM-/Tiefendaten beim Start den Haken **neu_laden** setzen.
 3. Danach liegen im Hauptordner: `hiddensee-revier.json`, `hiddensee-gelaende.bin`, `hiddensee-umgebung.json`, `hiddensee-maske.png`, `hiddensee-vorschau.png`, `hiddensee-namensnennung.txt`. Die Zusammenfassung des Laufs (mit Vorschaubild und Warnungen) steht in der Action.
 4. Anschauen: `revierkarte.html` (bzw. `revierkarte.html?r=hiddensee`). Ziehen, Mausrad/zwei Finger zum Zoomen, Tippen zeigt Position und Tiefe/Höhe, „📏 Messen“ misst Strecken in Seemeilen, „☰ Ebenen“ schaltet Tiefen, Tiefenlinien, Gelände, Umgebung, Gebäude, Seezeichen, Namen.
@@ -28,7 +35,7 @@ Für große Küstenreviere lädt nicht der Browser die Daten, sondern ein Skript
 **KEINE Navigationskarte.** Tiefen sind grob und haben keinen bekannten Stand.
 
 ## Dateien
-`revier_bauen.py` (Revier-Bauer), `revierkarte.html` (Kartenansicht), `.github/workflows/revier.yml` (Action), `index.html` (enthält CSS, Code und Konfiguration; GeoSN-Einstellungen oben im Block `window.CFG`, es gibt keine separate config.js), `manifest.webmanifest`, `sw.js`, Icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).
+`revier_bauen.py` (Revier-Bauer), `revier_spiel.py` (Spielexport mit Kacheln und Kursen), `revierkarte.html` (Kartenansicht), `.github/workflows/revier.yml` (Action), `index.html` (enthält CSS, Code und Konfiguration; GeoSN-Einstellungen oben im Block `window.CFG`, es gibt keine separate config.js), `manifest.webmanifest`, `sw.js`, Icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).
 
 ## Neues Projekt & Autosave
 - **＋ Neu** (Leiste) bzw. **＋ Neues Projekt** (Panel „Projekt“): Name eingeben, Ort per Namenssuche (OSM-Nominatim, nur auf Knopfdruck/Enter) oder als „Breite, Länge“ (z. B. `51.27, 12.33`) wählen, oder „Aktuellen Kartenausschnitt nehmen“. Das alte Projekt kann vorher als JSON gesichert werden (Haken ist voreingestellt). Danach ist „💧 See wählen“ aktiv: auf die Wasserfläche tippen.
