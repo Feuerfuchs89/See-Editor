@@ -1,6 +1,6 @@
 // Seekoje – Offline-Speicher für App-Dateien und Bibliotheken (Kartenkacheln werden bewusst NICHT gespeichert)
-const CACHE='seekoje-v15';
-const CORE=['./','index.html','manifest.webmanifest','icon-192.png','icon-512.png','apple-touch-icon.png',
+const CACHE='seekoje-v16';
+const CORE=['./','index.html','revierkarte.html','manifest.webmanifest','icon-192.png','icon-512.png','apple-touch-icon.png',
  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css','https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
  'https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css','https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js',
  'https://unpkg.com/proj4@2.11.0/dist/proj4.js'];

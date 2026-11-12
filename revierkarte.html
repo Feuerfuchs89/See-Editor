@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Seekoje Revierkarte</title>
+<meta name="theme-color" content="#0c1820">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+:root{--bg:#0c1820;--panel:rgba(12,24,32,.92);--line:#24404f;--text:#e4eef2;--muted:#8fa9b5;--acc:#3fb6c8;--warn:#f0b44c}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+#map{position:fixed;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;background:#e9e2cc}
+#map.drag{cursor:grabbing}
+#map.mess{cursor:crosshair}
+.bar{position:fixed;left:8px;right:8px;top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;pointer-events:none}
+.bar>*{pointer-events:auto}
+.title{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-weight:600;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title small{display:block;font-weight:400;color:var(--muted);font-size:11.5px}
+button,.chip{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 10px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.on{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+#layers{position:fixed;top:64px;right:8px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 10px;display:none;min-width:190px}
+#layers.open{display:block}
+#layers label{display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer}
+#layers h4{margin:4px 0 4px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.info{position:fixed;left:8px;bottom:30px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-variant-numeric:tabular-nums;max-width:calc(100% - 16px)}
+.info b{color:var(--acc);font-weight:600}
+#mess{display:none}
+.foot{position:fixed;left:0;right:0;bottom:0;padding:4px 10px;font-size:10.5px;color:#3a4a50;background:rgba(255,255,255,.72);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.foot strong{color:#8a3b12}
+#msg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:var(--muted);pointer-events:none}
+#msg div{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;max-width:520px;pointer-events:auto}
+#msg code{color:var(--text)}
+#warn{position:fixed;right:8px;bottom:30px;max-width:min(420px,calc(100% - 16px));background:var(--panel);border:1px solid var(--warn);border-radius:10px;padding:6px 10px;font-size:12px;display:none}
+#warn summary{cursor:pointer;color:var(--warn)}
+@media (max-width:560px){.title small{display:none}.bar button{padding:7px 8px}}
+</style>
+</head>
+<body>
+<canvas id="map"></canvas>
+<div class="bar">
+  <div class="title" id="title">Revierkarte<small>lädt …</small></div>
+  <button id="bAll" title="Ganzes Revier zeigen">⤢ Revier</button>
+  <button id="bMess" title="Strecke messen: Punkte antippen, nochmal drücken zum Beenden">📏 Messen</button>
+  <button id="bLay" title="Ebenen">☰ Ebenen</button>
+</div>
+<div id="layers">
+  <h4>Wasser</h4>
+  <label><input type="checkbox" data-l="tiefe" checked> Tiefenstufen</label>
+  <label><input type="checkbox" data-l="linien" checked> Tiefenlinien 1/2/3/5/10/20 m</label>
+  <label><input type="checkbox" data-l="see" checked> Seezeichen</label>
+  <h4>Land</h4>
+  <label><input type="checkbox" data-l="relief" checked> Gelände (Schummerung)</label>
+  <label><input type="checkbox" data-l="umg" checked> Umgebung (Wald, Orte …)</label>
+  <label><input type="checkbox" data-l="haus" checked> Gebäude (ab Nähe)</label>
+  <label><input type="checkbox" data-l="namen" checked> Namen</label>
+</div>
+<div class="info" id="info">Karte antippen: Position, Tiefe bzw. Höhe</div>
+<details id="warn"><summary>⚠ Hinweise beim Bauen</summary><div id="warnList"></div></details>
+<div class="foot" id="foot"><strong>Keine Navigationskarte.</strong></div>
+<div id="msg"><div>Revier wird geladen …</div></div>
+
+<script>
+'use strict';
+/* ---------- Revier wählen: revierkarte.html?r=hiddensee ---------- */
+const R=(new URLSearchParams(location.search).get('r')||'hiddensee').replace(/[^a-z0-9_-]/gi,'');
+const $=s=>document.querySelector(s);
+const cv=$('#map'),ctx=cv.getContext('2d');
+let M=null,G=null,ENV=[],P={},view={s:.02,cx:0,cy:0},DPR=1,need=true;
+const L={tiefe:1,linien:1,see:1,relief:1,umg:1,haus:1,namen:1};
+
+/* ---------- UTM 33 → WGS84 (GRS80, Krüger) ---------- */
+const UTM=(()=>{const a=6378137,f=1/298.257222101,n=f/(2-f),A=a/(1+n)*(1+n*n/4+n**4/64),
+ be=[n/2-2*n*n/3+37*n**3/96,n*n/48+n**3/15,17*n**3/480],de=[2*n-2*n*n/3-2*n**3,7*n*n/3-8*n**3/5,56*n**3/15],k0=.9996,L0=15*Math.PI/180;
+ return(x,y)=>{const xi=y/(k0*A),eta=(x-5e5)/(k0*A);let x2=xi,e2=eta;
+  for(let j=1;j<=3;j++){x2-=be[j-1]*Math.sin(2*j*xi)*Math.cosh(2*j*eta);e2-=be[j-1]*Math.cos(2*j*xi)*Math.sinh(2*j*eta)}
+  const chi=Math.asin(Math.sin(x2)/Math.cosh(e2));let la=chi;for(let j=1;j<=3;j++)la+=de[j-1]*Math.sin(2*j*chi);
+  return[(L0+Math.atan2(Math.sinh(e2),Math.cos(x2)))*180/Math.PI,la*180/Math.PI]}})();
+
+/* ---------- Laden ---------- */
+async function load(){
+  try{
+    const r=await fetch(`${R}-revier.json`,{cache:'no-cache'});if(!r.ok)throw new Error(`${R}-revier.json nicht gefunden (HTTP ${r.status})`);
+    M=await r.json();
+    const g=await fetch(M.grid.file,{cache:'no-cache'});if(!g.ok)throw new Error(M.grid.file+' fehlt');
+    G={z:new Int16Array(await g.arrayBuffer()),nx:M.grid.ncols,ny:M.grid.nrows,cs:M.grid.cellsize};
+    try{const e=await fetch(M.environment.file,{cache:'no-cache'});if(e.ok)ENV=(await e.json()).features||[]}catch(_){}
+  }catch(err){
+    $('#msg').innerHTML=`<div><b>Revier „${R}“ konnte nicht geladen werden.</b><br>${err.message}<br><br>Die Revierdateien entstehen über die GitHub Action <code>Revier bauen</code> (Reiter „Actions“ im Repository).</div>`;return}
+  $('#msg').style.display='none';
+  document.title=M.name+' · Revierkarte';
+  $('#title').innerHTML=`${esc(M.name)}<small>${(M.size.w/1000).toFixed(1)} × ${(M.size.h/1000).toFixed(1)} km · Wasser ${M.water_area_km2} km² · ${M.seamarks.length} Seezeichen</small>`;
+  $('#foot').innerHTML='<strong>Keine Navigationskarte.</strong> '+M.attribution.map(esc).join(' · ');
+  if(M.warnungen&&M.warnungen.length){$('#warn').style.display='block';$('#warnList').innerHTML=M.warnungen.slice(0,40).map(w=>'• '+esc(w)).join('<br>')}
+  build();fit();resize();
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* ---------- Vorbereiten ---------- */
+const TIEFE=[[1,[96,150,205]],[2,[128,176,222]],[3,[160,198,234]],[5,[188,215,240]],[10,[213,230,246]],[20,[232,241,250]],[1e9,[246,249,252]]];
+function build(){
+  const{nx,ny,z,cs}=G;
+  // Wasserbild (Tiefenstufen) und Landbild (Schummerung + Höhentönung)
+  const wI=new ImageData(nx,ny),lI=new ImageData(nx,ny),w=wI.data,l=lI.data;
+  for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){
+    const k=j*nx+i,v=z[k]/100,o=k*4;
+    const t=v<0?-v:0;let c=TIEFE[TIEFE.length-1][1];for(const[g,col]of TIEFE)if(t<g){c=col;break}
+    w[o]=c[0];w[o+1]=c[1];w[o+2]=c[2];w[o+3]=255;
+    const zl=i>0?z[k-1]:z[k],zr=i<nx-1?z[k+1]:z[k],zu=j>0?z[k-nx]:z[k],zd=j<ny-1?z[k+nx]:z[k];
+    const dx=(Math.max(zr,0)-Math.max(zl,0))/100/(2*cs),dy=(Math.max(zu,0)-Math.max(zd,0))/100/(2*cs);
+    const hs=Math.max(.55,Math.min(1.18,1+(-dx+dy)*3.2)),hv=Math.max(v,0),tt=Math.min(hv/40,1);
+    l[o]=Math.min(255,(236-14*tt)*hs);l[o+1]=Math.min(255,(228-4*tt)*hs);l[o+2]=Math.min(255,(200-22*tt)*hs);l[o+3]=255}
+  P.wImg=toCanvas(wI);P.lImg=toCanvas(lI);
+  // Wasser- und Landflächen als Pfad (Meter)
+  P.wasser=new Path2D();for(const t of M.water){ring(P.wasser,t.outer);t.islands.forEach(r=>ring(P.wasser,r))}
+  P.land=new Path2D();M.land.forEach(r=>ring(P.land,r));
+  // Tiefenlinien (Marching Squares auf Zellmittelpunkten)
+  P.linien=contours([-1,-2,-3,-5,-10,-20]);
+  // Umgebung nach Stil gruppieren
+  P.env={};P.lab=[];P.lh=[];
+  for(const f of ENV){
+    if(f.t==='N'){if(f.c==='place'&&f.n)P.lab.push(f);else if(f.c==='lighthouse')P.lh.push(f);continue}
+    const p=P.env[f.c]||(P.env[f.c]=new Path2D());
+    if(f.t==='L'){p.moveTo(f.g[0],f.g[1]);for(let i=2;i<f.g.length;i+=2)p.lineTo(f.g[i],f.g[i+1])}
+    else f.g.forEach(r=>{p.moveTo(r[0],r[1]);for(let i=2;i<r.length;i+=2)p.lineTo(r[i],r[i+1]);p.closePath()});
+  }
+  const pr={city:0,town:1,village:2,island:2,peninsula:3,hamlet:3,cape:3,peak:3,locality:4,islet:4,isolated_dwelling:5};
+  P.lab.sort((a,b)=>(pr[a.s]??6)-(pr[b.s]??6));
+  P.track=new Path2D();for(const s of M.seamark_lines){const q=s.p;if(q.length<2)continue;P.track.moveTo(q[0][0],q[0][1]);q.forEach(v=>P.track.lineTo(v[0],v[1]))}
+}
+function ring(p,r){if(!r.length)return;p.moveTo(r[0][0],r[0][1]);for(let i=1;i<r.length;i++)p.lineTo(r[i][0],r[i][1]);p.closePath()}
+function toCanvas(img){const c=document.createElement('canvas');c.width=img.width;c.height=img.height;c.getContext('2d').putImageData(img,0,0);return c}
+function contours(levels){
+  const{nx,ny,z,cs}=G,H=M.size.h,p=new Path2D(),X=i=>(i+.5)*cs,Y=j=>H-(j+.5)*cs;
+  for(const lv of levels){const L100=lv*100;
+    for(let j=0;j<ny-1;j++)for(let i=0;i<nx-1;i++){
+      const a=z[j*nx+i],b=z[j*nx+i+1],c=z[(j+1)*nx+i+1],d=z[(j+1)*nx+i];
+      const idx=(a<L100?8:0)|(b<L100?4:0)|(c<L100?2:0)|(d<L100?1:0);if(idx===0||idx===15)continue;
+      const t=(u,v)=>(L100-u)/(v-u||1e-9);
+      const T=[X(i)+t(a,b)*cs,Y(j)],Rr=[X(i+1),Y(j)-t(b,c)*cs],B=[X(i)+t(d,c)*cs,Y(j+1)],Lf=[X(i),Y(j)-t(a,d)*cs];
+      const seg=(P1,P2)=>{p.moveTo(P1[0],P1[1]);p.lineTo(P2[0],P2[1])};
+      switch(idx){case 1:case 14:seg(Lf,B);break;case 2:case 13:seg(B,Rr);break;case 3:case 12:seg(Lf,Rr);break;case 4:case 11:seg(T,Rr);break;
+        case 6:case 9:seg(T,B);break;case 7:case 8:seg(Lf,T);break;case 5:seg(Lf,T);seg(B,Rr);break;case 10:seg(T,Rr);seg(Lf,B);break}}}
+  return p}
+
+/* ---------- Ansicht ---------- */
+function resize(){DPR=Math.min(window.devicePixelRatio||1,2);cv.width=innerWidth*DPR;cv.height=innerHeight*DPR;need=true}
+function fit(){const W=innerWidth,H=innerHeight-70;view.s=Math.min(W/M.size.w,H/M.size.h)*.95;view.cx=M.size.w/2;view.cy=M.size.h/2;need=true}
+const toS=(x,y)=>[(x-view.cx)*view.s+innerWidth/2,innerHeight/2-(y-view.cy)*view.s];
+const toW=(sx,sy)=>[(sx-innerWidth/2)/view.s+view.cx,(innerHeight/2-sy)/view.s+view.cy];
+function worldT(){const s=view.s*DPR;ctx.setTransform(s,0,0,-s,(innerWidth/2-view.cx*view.s)*DPR,(innerHeight/2+view.cy*view.s)*DPR)}
+function screenT(){ctx.setTransform(DPR,0,0,DPR,0,0)}
+
+const STIL={farmland:['#ece6c4'],grass:['#dde8bd'],urban:['#e2d6cc'],wetland:['#d3e3d1'],beach:['#f4e7b4'],scrub:['#cfdcaa'],forest:['#b9d29b'],
+ harbor:['#d9d2df'],water:['#a9cbe7'],cliff:[null,'#8b6f4e',1.6],waterway:[null,'#8fbbe0',1.4],path:[null,'#a08f72',.8,[4,3]],road:[null,'#ffffff',2.4,null,'#b8a990'],
+ rail:[null,'#6b6b6b',1.2,[6,4]],pier:['#bfb6a6','#7c7366',1],bridge:[null,'#7c7366',2]};
+
+function draw(){
+  need=false;if(!M)return;
+  const W=cv.width,H=cv.height;screenT();ctx.fillStyle='#e9e2cc';ctx.fillRect(0,0,innerWidth,innerHeight);
+  const px=1/view.s; // Meter pro Bildschirmpixel
+  // Landbild (unten), Wasserbild nur innerhalb der Wasserflächen
+  const img=(c)=>{const s=view.s*DPR;ctx.setTransform(s*G.cs,0,0,s*G.cs,(innerWidth/2-view.cx*view.s)*DPR,(innerHeight/2-(M.size.h-view.cy)*view.s)*DPR);ctx.imageSmoothingEnabled=true;ctx.drawImage(c,0,0)};
+  if(L.relief)img(P.lImg);else{screenT();ctx.fillStyle='#ebe4cf';ctx.fillRect(0,0,innerWidth,innerHeight)}
+  worldT();
+  if(L.umg){for(const k of['farmland','grass','urban','wetland','beach','scrub','forest','harbor','water']){const p=P.env[k];if(!p)continue;ctx.globalAlpha=L.relief?.62:1;ctx.fillStyle=STIL[k][0];ctx.fill(p)}ctx.globalAlpha=1}
+  ctx.save();ctx.clip(P.wasser,'evenodd');
+  if(L.tiefe)img(P.wImg);else{screenT();ctx.fillStyle='#d5e6f4';ctx.fillRect(0,0,innerWidth,innerHeight)}
+  worldT();
+  if(L.linien){ctx.strokeStyle='rgba(40,90,140,.55)';ctx.lineWidth=.8*px;ctx.stroke(P.linien)}
+  ctx.restore();worldT();
+  // Uferlinie
+  ctx.strokeStyle='#4a5a60';ctx.lineWidth=1.1*px;ctx.stroke(P.wasser);
+  if(L.umg){
+    for(const k of['cliff','waterway','path','rail','road','pier','bridge']){const p=P.env[k],st=STIL[k];if(!p)continue;
+      if(k==='path'&&view.s<.25)continue;
+      if(st[4]){ctx.strokeStyle=st[4];ctx.lineWidth=(st[2]+1.4)*px;ctx.setLineDash([]);ctx.stroke(p)}
+      if(st[0]){ctx.fillStyle=st[0];ctx.fill(p)}
+      ctx.strokeStyle=st[1];ctx.lineWidth=st[2]*px;ctx.setLineDash(st[3]?st[3].map(v=>v*px):[]);ctx.stroke(p)}
+    ctx.setLineDash([])}
+  if(L.haus&&P.env.building&&view.s>.35){ctx.fillStyle='#a8968a';ctx.fill(P.env.building);ctx.strokeStyle='#7d6b60';ctx.lineWidth=.5*px;ctx.stroke(P.env.building)}
+  if(L.see&&M.seamark_lines.length){ctx.strokeStyle='rgba(120,40,140,.7)';ctx.lineWidth=1.2*px;ctx.setLineDash([8*px,5*px]);ctx.stroke(P.track);ctx.setLineDash([])}
+  // Punkte in Bildschirmkoordinaten
+  screenT();
+  if(L.see)seamarks();
+  if(L.umg)P.lh.forEach(f=>{const[x,y]=toS(f.g[0],f.g[1]);star(x,y,7,'#f2c230')});
+  if(L.namen)labels();
+  messDraw();scaleBar();north();
+}
+const FARBE={red:'#d0312d',green:'#1e8a3c',yellow:'#f2c230',black:'#1b1b1b',white:'#fafafa',orange:'#f08a24',blue:'#2860c8',grey:'#888'};
+function seamarks(){
+  const kl=view.s<.06,box=[];
+  for(const s of M.seamarks){const[x,y]=toS(s.x,s.y);if(x<-20||y<-20||x>innerWidth+20||y>innerHeight+20)continue;
+    const cols=(s.farbe||'').split(';').map(c=>FARBE[c]||'#777'),r=kl?3:5.5;
+    ctx.lineWidth=1;ctx.strokeStyle='#222';
+    if(/light/.test(s.typ)){star(x,y,kl?5:8,'#f2c230');}
+    else if(/cardinal/.test(s.typ)){ctx.beginPath();ctx.moveTo(x,y-r*1.4);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r*1.4);ctx.lineTo(x-r,y);ctx.closePath();ctx.fillStyle=cols[0]||'#f2c230';ctx.fill();ctx.stroke();if(cols[1]){ctx.fillStyle=cols[1];ctx.fillRect(x-r*.4,y-r*.4,r*.8,r*.8)}}
+    else if(s.form==='conical'||s.form==='spar'&&cols[0]===FARBE.green){ctx.beginPath();ctx.moveTo(x,y-r*1.3);ctx.lineTo(x+r,y+r*.8);ctx.lineTo(x-r,y+r*.8);ctx.closePath();ctx.fillStyle=cols[0];ctx.fill();ctx.stroke()}
+    else if(s.form==='can'||s.form==='pillar'||s.form==='spar'||s.form==='barrel'){ctx.fillStyle=cols[0];ctx.fillRect(x-r*.8,y-r,r*1.6,r*2);ctx.strokeRect(x-r*.8,y-r,r*1.6,r*2)}
+    else{ctx.beginPath();ctx.arc(x,y,r*.8,0,7);ctx.fillStyle=cols[0];ctx.fill();ctx.stroke()}
+    if(s.name&&view.s>.12){label(s.name,x+8,y-6,11,'#3a2a55',box,false)}}
+}
+function star(x,y,r,c){ctx.beginPath();for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,q=i%2?r*.45:r;ctx.lineTo(x+q*Math.cos(a),y+q*Math.sin(a))}ctx.closePath();ctx.fillStyle=c;ctx.fill();ctx.strokeStyle='#5a4300';ctx.lineWidth=1;ctx.stroke()}
+function labels(){const box=[];const min={city:0,town:0,village:.02,island:.01,peninsula:.03,hamlet:.06,cape:.05,peak:.05,locality:.1,islet:.08,isolated_dwelling:.2};
+  for(const f of P.lab){if(view.s<(min[f.s]??.1))continue;const[x,y]=toS(f.g[0],f.g[1]);
+    const big=f.s==='city'||f.s==='town',isl=f.s==='island'||f.s==='islet';
+    label(f.n,x,y,big?15:isl?13:12,isl?'#1d4c6e':'#2b2b2b',box,true,isl)}
+  if(view.s>.08)P.lh.forEach(f=>{if(!f.n)return;const[x,y]=toS(f.g[0],f.g[1]);label(f.n,x+10,y+12,11,'#5a4300',box,false)})}
+function label(t,x,y,sz,c,box,center,italic){ctx.font=`${italic?'italic ':''}600 ${sz}px system-ui,sans-serif`;const w=ctx.measureText(t).width,x0=center?x-w/2:x,b=[x0-3,y-sz,x0+w+3,y+4];
+  if(box.some(q=>!(b[2]<q[0]||b[0]>q[2]||b[3]<q[1]||b[1]>q[3])))return;box.push(b);
+  ctx.lineWidth=3;ctx.strokeStyle='rgba(255,255,255,.85)';ctx.strokeText(t,x0,y);ctx.fillStyle=c;ctx.fillText(t,x0,y)}
+function scaleBar(){const target=120/view.s,p=Math.pow(10,Math.floor(Math.log10(target))),m=[1,2,5,10].map(k=>k*p).filter(v=>v<=target).pop()||p,w=m*view.s;
+  const x=16,y=innerHeight-82;ctx.fillStyle='rgba(255,255,255,.8)';ctx.fillRect(x-6,y-16,w+12,24);ctx.strokeStyle='#222';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y-4);ctx.lineTo(x,y);ctx.lineTo(x+w,y);ctx.lineTo(x+w,y-4);ctx.stroke();
+  ctx.font='600 11px system-ui';ctx.fillStyle='#222';ctx.fillText(m>=1000?(m/1000)+' km':m+' m',x,y-6);const sm=m/1852;ctx.fillText(sm>=.1?nf(sm,sm<1?2:1)+' sm':'',x+w-34,y-6)}
+function north(){const x=innerWidth-26,y=110;ctx.fillStyle='rgba(255,255,255,.8)';ctx.beginPath();ctx.arc(x,y,15,0,7);ctx.fill();ctx.beginPath();ctx.moveTo(x,y-11);ctx.lineTo(x+6,y+7);ctx.lineTo(x,y+3);ctx.lineTo(x-6,y+7);ctx.closePath();ctx.fillStyle='#222';ctx.fill();ctx.font='700 9px system-ui';ctx.fillText('N',x-3,y-15+(-2))}
+
+/* ---------- Messwerte ---------- */
+function at(x,y){if(!G)return null;const i=Math.floor(x/G.cs),j=Math.floor((M.size.h-y)/G.cs);if(i<0||j<0||i>=G.nx||j>=G.ny)return null;return G.z[j*G.nx+i]/100}
+const nf=(v,d=1)=>v.toLocaleString('de-DE',{minimumFractionDigits:d,maximumFractionDigits:d});
+function showInfo(sx,sy){const[x,y]=toW(sx,sy);if(x<0||y<0||x>M.size.w||y>M.size.h){$('#info').textContent='außerhalb des Reviers';return}
+  const[lo,la]=UTM(x+M.origin_utm.x,y+M.origin_utm.y),z=at(x,y),fmt=(v,h,n)=>{const a=Math.abs(v),d=Math.floor(a),m=(a-d)*60;return`${d}° ${nf(m,3)}′ ${v>=0?h:n}`};
+  let s=`${fmt(la,'N','S')}  ${fmt(lo,'O','W')}`;
+  if(z!=null)s+=z<0?` · Tiefe <b>${nf(-z)} m</b>`:` · Höhe <b>${nf(z)} m</b>`;
+  if(mess.on&&mess.p.length)s+=` · Strecke <b>${nf(messLen()/1852,2)} sm</b> (${nf(messLen()/1000,2)} km)`;
+  $('#info').innerHTML=s}
+const mess={on:false,p:[]};
+const messLen=()=>mess.p.reduce((a,p,i)=>i?a+Math.hypot(p[0]-mess.p[i-1][0],p[1]-mess.p[i-1][1]):0,0);
+function messDraw(){if(!mess.p.length)return;ctx.strokeStyle='#c2185b';ctx.fillStyle='#c2185b';ctx.lineWidth=2.2;ctx.beginPath();mess.p.forEach((p,i)=>{const[x,y]=toS(p[0],p[1]);i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();
+  let acc=0;mess.p.forEach((p,i)=>{const[x,y]=toS(p[0],p[1]);ctx.beginPath();ctx.arc(x,y,4,0,7);ctx.fill();if(i){acc+=Math.hypot(p[0]-mess.p[i-1][0],p[1]-mess.p[i-1][1]);label(nf(acc/1852,2)+' sm',x+7,y-7,11,'#c2185b',[],false)}})}
+
+/* ---------- Bedienung: Ziehen, Zoomen (Rad, Finger), Tippen ---------- */
+const pts=new Map();let pinch=null,moved=false;
+function zoomAt(sx,sy,f){const[wx,wy]=toW(sx,sy);view.s=Math.max(.002,Math.min(view.s*f,20));const[nx,ny]=toW(sx,sy);view.cx+=wx-nx;view.cy+=wy-ny;need=true}
+cv.addEventListener('wheel',e=>{e.preventDefault();zoomAt(e.clientX,e.clientY,Math.exp(-e.deltaY*.0018))},{passive:false});
+cv.addEventListener('dblclick',e=>zoomAt(e.clientX,e.clientY,2));
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);pts.set(e.pointerId,[e.clientX,e.clientY]);moved=false;
+  if(pts.size===2){const[a,b]=[...pts.values()];pinch={d:Math.hypot(a[0]-b[0],a[1]-b[1]),m:[(a[0]+b[0])/2,(a[1]+b[1])/2]}}else cv.classList.add('drag')});
+cv.addEventListener('pointermove',e=>{if(!M)return;const p=pts.get(e.pointerId);
+  if(!p){showInfo(e.clientX,e.clientY);return}
+  if(pts.size===1){const dx=e.clientX-p[0],dy=e.clientY-p[1];if(Math.abs(dx)+Math.abs(dy)>3)moved=true;view.cx-=dx/view.s;view.cy+=dy/view.s;pts.set(e.pointerId,[e.clientX,e.clientY]);need=true}
+  else if(pinch){pts.set(e.pointerId,[e.clientX,e.clientY]);const[a,b]=[...pts.values()],d=Math.hypot(a[0]-b[0],a[1]-b[1]),m=[(a[0]+b[0])/2,(a[1]+b[1])/2];
+    view.cx-=(m[0]-pinch.m[0])/view.s;view.cy+=(m[1]-pinch.m[1])/view.s;zoomAt(m[0],m[1],d/pinch.d);pinch={d,m};moved=true}});
+const up=e=>{const was=pts.has(e.pointerId);pts.delete(e.pointerId);if(pts.size<2)pinch=null;if(!pts.size)cv.classList.remove('drag');
+  if(was&&!moved&&M&&e.type==='pointerup'){if(mess.on){mess.p.push(toW(e.clientX,e.clientY));need=true}showInfo(e.clientX,e.clientY)}};
+cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+addEventListener('resize',resize);
+$('#bAll').onclick=()=>M&&fit();
+$('#bLay').onclick=()=>{$('#layers').classList.toggle('open');$('#bLay').classList.toggle('on')};
+$('#bMess').onclick=()=>{mess.on=!mess.on;if(mess.on)mess.p=[];$('#bMess').classList.toggle('on',mess.on);cv.classList.toggle('mess',mess.on);need=true};
+document.querySelectorAll('#layers input').forEach(i=>{try{const v=localStorage.getItem('rk-'+i.dataset.l);if(v!==null)i.checked=v==='1'}catch(_){}
+  L[i.dataset.l]=i.checked;i.onchange=()=>{L[i.dataset.l]=i.checked;try{localStorage.setItem('rk-'+i.dataset.l,i.checked?'1':'0')}catch(_){}need=true}});
+(function loop(){if(need)draw();requestAnimationFrame(loop)})();
+load();
+</script>
+</body>
+</html>

@@ -9,8 +9,25 @@ Webapp (PWA) für Gewässer- und Regattastrecken. Keine Navigationssoftware. All
 
 Lokal testen: `python3 -m http.server 8080` im Ordner, dann http://localhost:8080.
 
+## Küstenrevier bauen (Hiddensee · Kubitzer Bodden · Strelasund)
+Für große Küstenreviere lädt nicht der Browser die Daten, sondern ein Skript baut sie einmal fertig auf.
+1. Dateien hochladen, auch den Ordner `.github/workflows/` mit `revier.yml` (GitHub verlangt genau diesen Ordner, sonst gibt es keine Action).
+2. Reiter **Actions** → **Revier bauen** → **Run workflow** → Revier `hiddensee` → Start. Dauer ca. 5–20 Minuten.
+3. Danach liegen im Hauptordner: `hiddensee-revier.json`, `hiddensee-gelaende.bin`, `hiddensee-umgebung.json`, `hiddensee-maske.png`, `hiddensee-vorschau.png`, `hiddensee-namensnennung.txt`. Die Zusammenfassung des Laufs (mit Vorschaubild und Warnungen) steht in der Action.
+4. Anschauen: `revierkarte.html` (bzw. `revierkarte.html?r=hiddensee`). Ziehen, Mausrad/zwei Finger zum Zoomen, Tippen zeigt Position und Tiefe/Höhe, „📏 Messen“ misst Strecken in Seemeilen, „☰ Ebenen“ schaltet Tiefen, Tiefenlinien, Gelände, Umgebung, Gebäude, Seezeichen, Namen.
+
+**Quellen:** Küste, Umgebung, Seezeichen aus OpenStreetMap/OpenSeaMap (Overpass); Wassertiefe EMODnet DTM (WCS, ca. 115 m, CC BY 4.0); Gelände Copernicus DEM GLO-30 (30 m, Oberflächenmodell). Wasser = Revier-Rechteck minus Land aus der OSM-Küstenlinie (`natural=coastline`, Land liegt links), deshalb sind Bodden und Strelasund automatisch dabei.
+
+**Formate** (UTM 33, Meter, Ursprung Südwest-Ecke wie beim Spiel-Export):
+- `-revier.json` (`seekoje-revier-1`): `water` (je Teil `outer` gegen, `islands` im Uhrzeigersinn), `land`, `seamarks` (Typ, Name, Farbe, Form, Kennung, x/y), `seamark_lines`, `grid`, `mask`, `attribution`, `warnungen`.
+- `-gelaende.bin`: int16 little-endian, Zentimeter (unter 0 = Wassertiefe, über 0 = Geländehöhe), 20-m-Raster, Zeile 0 = Norden. Tiefen sind aus dem 115-m-Raster interpoliert und am Ufer auf max. 10 % Neigung geglättet (`hang`).
+- `-umgebung.json` (`seekoje-umgebung-1`): Klassen wie im Editor plus `place`, `lighthouse`, `pier`, `cliff`; Geometrien als flache Meter-Listen.
+- Neues Revier: Eintrag in `REVIERE` oben in `revier_bauen.py` ergänzen (Name, Länge/Breite-Box).
+
+**KEINE Navigationskarte.** Tiefen sind grob und haben keinen bekannten Stand.
+
 ## Dateien
-`index.html` (enthält CSS, Code und Konfiguration; GeoSN-Einstellungen oben im Block `window.CFG`, es gibt keine separate config.js), `manifest.webmanifest`, `sw.js`, Icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).
+`revier_bauen.py` (Revier-Bauer), `revierkarte.html` (Kartenansicht), `.github/workflows/revier.yml` (Action), `index.html` (enthält CSS, Code und Konfiguration; GeoSN-Einstellungen oben im Block `window.CFG`, es gibt keine separate config.js), `manifest.webmanifest`, `sw.js`, Icons (`icon-192.png`, `icon-512.png`, `icon-maskable-512.png`, `apple-touch-icon.png`).
 
 ## Neues Projekt & Autosave
 - **＋ Neu** (Leiste) bzw. **＋ Neues Projekt** (Panel „Projekt“): Name eingeben, Ort per Namenssuche (OSM-Nominatim, nur auf Knopfdruck/Enter) oder als „Breite, Länge“ (z. B. `51.27, 12.33`) wählen, oder „Aktuellen Kartenausschnitt nehmen“. Das alte Projekt kann vorher als JSON gesichert werden (Haken ist voreingestellt). Danach ist „💧 See wählen“ aktiv: auf die Wasserfläche tippen.

@@ -1,0 +1,838 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Seekoje – Revier-Bauer
+======================
+Baut aus offenen Daten ein Küstenrevier (z. B. Hiddensee – Kubitzer Bodden – Strelasund)
+für die Revierkarte und das Spiel. Läuft als GitHub Action (Datei .github/workflows/revier.yml)
+oder lokal:   python revier_bauen.py hiddensee
+
+Quellen
+- Küstenlinie, Umgebung, Seezeichen: OpenStreetMap / OpenSeaMap über Overpass (ODbL)
+- Wassertiefe: EMODnet Digital Bathymetry (DTM), WCS, ca. 115 m Raster (CC BY 4.0)
+- Gelände: Copernicus DEM GLO-30 (Oberflächenmodell, 30 m), AWS Open Data
+
+Ausgabe (alles im Hauptordner, Präfix = Reviername):
+  <r>-revier.json      Metadaten, Wasser (Außenring + Inseln, Meter), Land, Seezeichen, Raster-Infos
+  <r>-gelaende.bin     Höhen/Tiefen-Raster int16 little-endian in cm (NHN ≈ Mittelwasser), Zeile 0 = Norden
+  <r>-umgebung.json    Umgebung (Wald, Häuser, Straßen, Häfen, Orte …) kompakt in Metern
+  <r>-maske.png        Wasser-Maske (weiß = Wasser), Norden oben
+  <r>-vorschau.png     Übersichtsbild
+  <r>-namensnennung.txt
+Koordinaten: EPSG:25833 (UTM 33), Meter, Ursprung = Südwest-Ecke des Reviers, x = Ost, y = Nord.
+KEINE Navigationskarte.
+"""
+import argparse, io, json, math, os, sys, time, datetime
+
+import numpy as np
+import requests
+from PIL import Image, ImageDraw
+
+# ------------------------------------------------------------------ Reviere
+REVIERE = {
+    'hiddensee': dict(
+        name='Hiddensee · Kubitzer Bodden · Strelasund',
+        # Länge/Breite: West, Süd, Ost, Nord  (Stralsund/Rügendamm bis Dornbusch/Bessin, westlich um Hiddensee)
+        bbox=(12.95, 54.28, 13.30, 54.64),
+        zelle=20,        # Gelände-/Tiefenraster in m
+        maske=5,         # Wasser-Maske in m
+        ufer_tol=1.0,    # Ufer-Vereinfachung (Douglas-Peucker) in m
+        hang=0.10,       # max. Unterwasser-Neigung am Ufer (Glättung der 115-m-Tiefen), 0 = aus
+        regatten=['Blaues Band vom Strelasund (Stralsund → Neuendorf/Hiddensee)', 'Rund Hiddensee'],
+    ),
+}
+
+OVERPASS = ['https://overpass-api.de/api/interpreter',
+            'https://overpass.private.coffee/api/interpreter',
+            'https://maps.mail.ru/osm/tools/overpass/api/interpreter']
+EMODNET_WCS = 'https://ows.emodnet-bathymetry.eu/wcs'
+COP30 = 'https://copernicus-dem-30m.s3.amazonaws.com/{n}/{n}.tif'
+UA = {'User-Agent': 'Seekoje-Revierbauer/1.0 (github.com/Feuerfuchs89; Segelsimulation, nicht kommerziell)'}
+
+ATTRIBUTION = [
+    '© OpenStreetMap-Mitwirkende, ODbL 1.0 (openstreetmap.org/copyright)',
+    'Seezeichen: OpenSeaMap (aus OpenStreetMap, ODbL)',
+    'Wassertiefe: EMODnet Bathymetry Consortium, EMODnet Digital Bathymetry (DTM), CC BY 4.0',
+    'Gelände: Copernicus DEM GLO-30 © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, '
+    'bereitgestellt im Rahmen von COPERNICUS durch die Europäische Union und ESA',
+]
+WARN = []
+
+
+def log(*a):
+    print(*a, flush=True)
+
+
+def warn(t):
+    WARN.append(t)
+    log('WARNUNG:', t)
+
+
+# ------------------------------------------------------------------ UTM 33 (ETRS89/GRS80), Krüger-Reihen
+_A, _F = 6378137.0, 1 / 298.257222101
+_N = _F / (2 - _F)
+_AA = _A / (1 + _N) * (1 + _N ** 2 / 4 + _N ** 4 / 64)
+_AL = [_N / 2 - 2 * _N ** 2 / 3 + 5 * _N ** 3 / 16, 13 * _N ** 2 / 48 - 3 * _N ** 3 / 5, 61 * _N ** 3 / 240]
+_BE = [_N / 2 - 2 * _N ** 2 / 3 + 37 * _N ** 3 / 96, _N ** 2 / 48 + _N ** 3 / 15, 17 * _N ** 3 / 480]
+_DE = [2 * _N - 2 * _N ** 2 / 3 - 2 * _N ** 3, 7 * _N ** 2 / 3 - 8 * _N ** 3 / 5, 56 * _N ** 3 / 15]
+_E = 2 * math.sqrt(_N) / (1 + _N)
+_K0, _E0, _L0 = 0.9996, 500000.0, math.radians(15.0)
+
+
+def utm(lon, lat):
+    lon = np.radians(np.asarray(lon, float)); lat = np.radians(np.asarray(lat, float))
+    s = np.sin(lat)
+    t = np.sinh(np.arctanh(s) - _E * np.arctanh(_E * s))
+    dl = lon - _L0
+    xi = np.arctan2(t, np.cos(dl)); eta = np.arctanh(np.sin(dl) / np.sqrt(1 + t * t))
+    x = eta.copy(); y = xi.copy()
+    for j, a in enumerate(_AL, 1):
+        x = x + a * np.cos(2 * j * xi) * np.sinh(2 * j * eta)
+        y = y + a * np.sin(2 * j * xi) * np.cosh(2 * j * eta)
+    return _E0 + _K0 * _AA * x, _K0 * _AA * y
+
+
+def geo(x, y):
+    xi = np.asarray(y, float) / (_K0 * _AA); eta = (np.asarray(x, float) - _E0) / (_K0 * _AA)
+    xi2 = xi.copy(); eta2 = eta.copy()
+    for j, b in enumerate(_BE, 1):
+        xi2 = xi2 - b * np.sin(2 * j * xi) * np.cosh(2 * j * eta)
+        eta2 = eta2 - b * np.cos(2 * j * xi) * np.sinh(2 * j * eta)
+    chi = np.arcsin(np.sin(xi2) / np.cosh(eta2))
+    lat = chi.copy()
+    for j, d in enumerate(_DE, 1):
+        lat = lat + d * np.sin(2 * j * chi)
+    lon = _L0 + np.arctan2(np.sinh(eta2), np.cos(xi2))
+    return np.degrees(lon), np.degrees(lat)
+
+
+# ------------------------------------------------------------------ Gebiet
+class Gebiet:
+    def __init__(self, bbox, zelle):
+        w, s, e, n = bbox
+        lo = np.array([w, e, e, w, (w + e) / 2, (w + e) / 2]); la = np.array([s, s, n, n, s, n])
+        X, Y = utm(lo, la)
+        # Rechteck in UTM um die Länge/Breite-Box, auf ganze Zellen gerundet
+        self.ox = math.floor(X.min() / zelle) * zelle
+        self.oy = math.floor(Y.min() / zelle) * zelle
+        x1 = math.ceil(X.max() / zelle) * zelle
+        y1 = math.ceil(Y.max() / zelle) * zelle
+        self.W, self.H = x1 - self.ox, y1 - self.oy
+        self.zelle = zelle
+
+    def to_m(self, lon, lat):
+        x, y = utm(lon, lat)
+        return x - self.ox, y - self.oy
+
+    def to_ll(self, x, y):
+        return geo(np.asarray(x) + self.ox, np.asarray(y) + self.oy)
+
+    def llbox(self, rand_m=0.0):
+        xs = np.array([-rand_m, self.W + rand_m]); ys = np.array([-rand_m, self.H + rand_m])
+        gx, gy = np.meshgrid(np.linspace(xs[0], xs[1], 9), np.linspace(ys[0], ys[1], 9))
+        lo, la = self.to_ll(gx.ravel(), gy.ravel())
+        return float(lo.min()), float(la.min()), float(lo.max()), float(la.max())
+
+
+# ------------------------------------------------------------------ Netz mit Zwischenspeicher
+class Netz:
+    def __init__(self, cache, offline):
+        self.cache = cache; self.offline = offline
+        os.makedirs(cache, exist_ok=True)
+
+    def _pfad(self, name):
+        return os.path.join(self.cache, name)
+
+    def overpass(self, name, query):
+        p = self._pfad(name + '.json')
+        if os.path.exists(p):
+            return json.load(open(p, encoding='utf-8'))
+        if self.offline:
+            warn(f'offline: {name} fehlt im Zwischenspeicher – leer')
+            return {'elements': []}
+        for runde in range(3):
+            for url in OVERPASS:
+                try:
+                    r = requests.post(url, data={'data': query}, headers=UA, timeout=400)
+                    if r.status_code == 200:
+                        d = r.json()
+                        if d.get('remark') and 'error' in d['remark'].lower():
+                            raise RuntimeError(d['remark'])
+                        json.dump(d, open(p, 'w', encoding='utf-8'))
+                        time.sleep(2)
+                        return d
+                    log(f'  Overpass {url} → HTTP {r.status_code}')
+                except Exception as ex:
+                    log(f'  Overpass {url} → {ex}')
+                time.sleep(10)
+            time.sleep(30 * (runde + 1))
+        raise RuntimeError(f'Overpass-Abfrage {name} fehlgeschlagen')
+
+    def datei(self, name, url, params=None, pflicht=False):
+        p = self._pfad(name)
+        if os.path.exists(p):
+            return open(p, 'rb').read()
+        if self.offline:
+            warn(f'offline: {name} fehlt im Zwischenspeicher')
+            return None
+        for v in range(3):
+            try:
+                r = requests.get(url, params=params, headers=UA, timeout=600)
+                if r.status_code == 200 and len(r.content) > 1000:
+                    open(p, 'wb').write(r.content)
+                    return r.content
+                log(f'  {url} → HTTP {r.status_code}, {len(r.content)} Bytes: {r.content[:200]!r}')
+                if r.status_code == 404:
+                    break
+            except Exception as ex:
+                log(f'  {url} → {ex}')
+            time.sleep(15 * (v + 1))
+        if pflicht:
+            raise RuntimeError(f'Download {name} fehlgeschlagen')
+        return None
+
+
+# ------------------------------------------------------------------ Geometrie-Helfer
+def dp(P, tol):
+    """Douglas-Peucker für offene Linie (N,2)."""
+    P = np.asarray(P, float)
+    if tol <= 0 or len(P) < 3:
+        return P
+    keep = np.zeros(len(P), bool); keep[0] = keep[-1] = True
+    st = [(0, len(P) - 1)]
+    while st:
+        i, j = st.pop()
+        if j <= i + 1:
+            continue
+        a, b = P[i], P[j]; seg = P[i + 1:j]; ab = b - a; L2 = float(ab @ ab)
+        if L2 == 0:
+            d = np.hypot(*(seg - a).T)
+        else:
+            t = np.clip(((seg - a) @ ab) / L2, 0, 1)
+            d = np.hypot(*(seg - (a + t[:, None] * ab)).T)
+        k = int(np.argmax(d))
+        if d[k] > tol:
+            m = i + 1 + k; keep[m] = True; st += [(i, m), (m, j)]
+    return P[keep]
+
+
+def dp_ring(P, tol):
+    P = np.asarray(P, float)
+    if len(P) > 1 and np.allclose(P[0], P[-1]):
+        P = P[:-1]
+    if tol <= 0 or len(P) < 4:
+        return P
+    # an den zwei entferntesten Punkten teilen, damit der Ring stabil bleibt
+    k = int(np.argmax(np.hypot(*(P - P[0]).T)))
+    a = dp(P[:k + 1], tol); b = dp(np.vstack([P[k:], P[:1]]), tol)
+    R = np.vstack([a[:-1], b[:-1]])
+    return R if len(R) >= 3 else P
+
+
+def flaeche(P):
+    P = np.asarray(P, float); x, y = P[:, 0], P[:, 1]
+    return 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)))
+
+
+def im_poly(pt, P):
+    x, y = pt; P = np.asarray(P, float); xi, yi = P[:, 0], P[:, 1]; xj, yj = np.roll(xi, 1), np.roll(yi, 1)
+    c = ((yi > y) != (yj > y)) & (x < (xj - xi) * (y - yi) / np.where(yj - yi == 0, 1e-30, yj - yi) + xi)
+    return bool(np.count_nonzero(c) % 2)
+
+
+def ketten(wege, richtung_fest):
+    """Wege (Listen von (lon,lat)) an gemeinsamen Endpunkten zu Ketten verbinden."""
+    key = lambda p: (round(p[0], 7), round(p[1], 7))
+    wege = [list(w) for w in wege if len(w) >= 2]
+    frei = set(range(len(wege)))
+    an_start, an_ende = {}, {}
+    for i, w in enumerate(wege):
+        an_start.setdefault(key(w[0]), []).append(i); an_ende.setdefault(key(w[-1]), []).append(i)
+    def nimm(d, k, umgekehrt=False):
+        for i in d.get(k, []):
+            if i in frei:
+                frei.discard(i); return wege[i][::-1] if umgekehrt else wege[i]
+        return None
+    out = []
+    while frei:
+        i = frei.pop(); c = list(wege[i])
+        while key(c[-1]) != key(c[0]):
+            w = nimm(an_start, key(c[-1]))
+            if w is None and not richtung_fest:
+                w = nimm(an_ende, key(c[-1]), True)
+            if w is None:
+                break
+            c += w[1:]
+        while key(c[-1]) != key(c[0]):
+            w = nimm(an_ende, key(c[0]))
+            if w is None and not richtung_fest:
+                w = nimm(an_start, key(c[0]), True)
+            if w is None:
+                break
+            c = w[:-1] + c
+        out.append((c, key(c[-1]) == key(c[0])))
+    return out
+
+
+# ------------------------------------------------------------------ Küste → Land/Wasser
+class Rechteck:
+    def __init__(self, W, H):
+        self.W, self.H = W, H; self.L = 2 * (W + H)
+        self.ecken = [(0.0, (0.0, 0.0)), (W, (W, 0.0)), (W + H, (W, H)), (2 * W + H, (0.0, H))]
+
+    def drin(self, p, eps=1e-6):
+        return -eps <= p[0] <= self.W + eps and -eps <= p[1] <= self.H + eps
+
+    def t(self, p):
+        x, y = p; W, H = self.W, self.H
+        d = [abs(y), abs(x - W), abs(y - H), abs(x)]
+        k = int(np.argmin(d))
+        return [min(max(x, 0), W), W + min(max(y, 0), H), W + H + (W - min(max(x, 0), W)), 2 * W + H + (H - min(max(y, 0), H))][k] % self.L
+
+    def rand(self, p):
+        x, y = p; W, H = self.W, self.H
+        d = [abs(y), abs(x - W), abs(y - H), abs(x)]
+        k = int(np.argmin(d)); x = min(max(x, 0), W); y = min(max(y, 0), H)
+        return [(x, 0.0), (W, y), (x, H), (0.0, y)][k]
+
+    def seg(self, p, q):
+        x0, y0 = p; dx, dy = q[0] - x0, q[1] - y0; t0, t1 = 0.0, 1.0
+        for pp, qq in ((-dx, x0), (dx, self.W - x0), (-dy, y0), (dy, self.H - y0)):
+            if pp == 0:
+                if qq < 0:
+                    return None
+            else:
+                r = qq / pp
+                if pp < 0:
+                    t0 = max(t0, r)
+                else:
+                    t1 = min(t1, r)
+        if t1 - t0 <= 1e-12:
+            return None
+        return t0, t1
+
+    def clip(self, pts):
+        """Linie an Rechteck schneiden → Teilstücke, die am Rand beginnen und enden."""
+        stuecke, cur, innen_start = [], None, False
+        lerp = lambda p, q, t: (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+        for p, q in zip(pts, pts[1:]):
+            c = self.seg(p, q)
+            if c is None:
+                if cur is not None:
+                    stuecke.append(cur); cur = None
+                continue
+            t0, t1 = c
+            if cur is None:
+                if t0 == 0 and not self._aufrand(p):
+                    innen_start = True
+                cur = [lerp(p, q, t0)]
+            cur.append(lerp(p, q, t1))
+            if t1 < 1:
+                stuecke.append(cur); cur = None
+        if cur is not None:
+            stuecke.append(cur)
+        out = []
+        for s in stuecke:
+            s2 = [s[0]]
+            for p in s[1:]:
+                if abs(p[0] - s2[-1][0]) > 1e-6 or abs(p[1] - s2[-1][1]) > 1e-6:
+                    s2.append(p)
+            if len(s2) < 2:
+                continue
+            for ende in (0, -1):
+                if not self._aufrand(s2[ende]):
+                    warn(f'Küstenlinie endet im Revier bei x={s2[ende][0]:.0f} m, y={s2[ende][1]:.0f} m – an den Rand verlängert (Datenlücke in OSM?)')
+                    r = self.rand(s2[ende])
+                    if ende == 0:
+                        s2.insert(0, r)
+                    else:
+                        s2.append(r)
+            out.append(s2)
+        return out
+
+    def _aufrand(self, p, eps=0.01):
+        return min(abs(p[0]), abs(p[0] - self.W), abs(p[1]), abs(p[1] - self.H)) <= eps
+
+    def lauf(self, stuecke):
+        """Teilstücke (Fläche jeweils links) über den Rand gegen den Uhrzeigersinn zu Ringen schließen."""
+        S = [dict(p=s, a=self.t(s[0]), e=self.t(s[-1])) for s in stuecke]
+        frei = set(range(len(S))); ringe = []
+        while frei:
+            st = frei.pop(); ring = list(S[st]['p']); cur = st; schutz = 0
+            while True:
+                schutz += 1
+                if schutz > len(S) + 5:
+                    warn('Ring konnte nicht geschlossen werden'); break
+                te = S[cur]['e']
+                nx = min(range(len(S)), key=lambda i: ((S[i]['a'] - te) % self.L) if (i in frei or i == st) else 1e30)
+                ta = S[nx]['a']; d = (ta - te) % self.L
+                for tc, pc in sorted(self.ecken, key=lambda c: (c[0] - te) % self.L):
+                    dc = (tc - te) % self.L
+                    if 0 < dc < d:
+                        ring.append(pc)
+                if nx == st:
+                    break
+                frei.discard(nx); ring += S[nx]['p']; cur = nx
+            if len(ring) >= 3:
+                ringe.append(ring)
+        return ringe
+
+
+def kueste(netz, geb, cfg):
+    log('Küstenlinie laden …')
+    w, s, e, n = geb.llbox(3000)
+    d = netz.overpass('kueste', f'[out:json][timeout:300];way["natural"="coastline"]({s},{w},{n},{e});out geom;')
+    wege = [[(p['lon'], p['lat']) for p in el['geometry']] for el in d['elements'] if el.get('geometry')]
+    log(f'  {len(wege)} Küstenwege')
+    R = Rechteck(geb.W, geb.H)
+    stuecke, insel, seen = [], [], []
+    for c, zu in ketten(wege, True):
+        lo, la = np.array(c).T; x, y = geb.to_m(lo, la); P = list(zip(x.tolist(), y.tolist()))
+        if zu:
+            innen = [R.drin(p) for p in P]
+            if all(innen):
+                (insel if flaeche(P) > 0 else seen).append(P); continue
+            if any(innen) or any(R.seg(p, q) for p, q in zip(P, P[1:])):
+                k = next((i for i, f in enumerate(innen) if not f), 0)   # Ring an einem Punkt außerhalb beginnen
+                P = P[k:] + P[1:k + 1]
+            else:
+                if im_poly((geb.W / 2, geb.H / 2), P) and flaeche(P) > 0:
+                    warn('Revier liegt komplett in einer Landfläche'); insel.append([(0, 0), (geb.W, 0), (geb.W, geb.H), (0, geb.H)])
+                continue
+        stuecke += R.clip(P)
+    land = R.lauf(stuecke) + insel
+    wasser_aussen = R.lauf([s[::-1] for s in stuecke]) if stuecke else [[(0.0, 0.0), (geb.W, 0.0), (geb.W, geb.H), (0.0, geb.H)]]
+    wasser_aussen += [P[::-1] for P in seen]
+    tol = cfg['ufer_tol']
+    teile = []
+    for A in wasser_aussen:
+        A = dp_ring(A, tol)
+        if abs(flaeche(A)) < 50:
+            continue
+        teile.append(dict(outer=A, islands=[]))
+    for I in insel:
+        I2 = dp_ring(I, tol)
+        if abs(flaeche(I2)) < 5:
+            continue
+        for t in teile:
+            if im_poly(I2[0], t['outer']):
+                t['islands'].append(I2); break
+    land = [dp_ring(L, tol) for L in land]
+    land = [L for L in land if abs(flaeche(L)) >= 5]
+    for t in teile:
+        if flaeche(t['outer']) < 0: t['outer'] = t['outer'][::-1]
+        t['islands'] = [I if flaeche(I) < 0 else I[::-1] for I in t['islands']]
+    land = [L if flaeche(L) > 0 else L[::-1] for L in land]
+    wf = sum(flaeche(t['outer']) + sum(flaeche(i) for i in t['islands']) for t in teile)
+    log(f'  Wasser {wf / 1e6:.1f} km² in {len(teile)} Teil(en), {sum(len(t["islands"]) for t in teile)} Inseln, {len(land)} Landflächen')
+    if not wege:
+        warn('Keine Küstenlinie gefunden – das ganze Revier wird als Wasser behandelt')
+    return teile, land, wf
+
+
+def maske(teile, W, H, cs):
+    w, h = int(math.ceil(W / cs)), int(math.ceil(H / cs))
+    im = Image.new('L', (w, h), 0); dr = ImageDraw.Draw(im)
+    f = lambda P: [(p[0] / cs, (H - p[1]) / cs) for p in P]
+    for t in teile:
+        dr.polygon(f(t['outer']), fill=255)
+    for t in teile:
+        for i in t['islands']:
+            dr.polygon(f(i), fill=0)
+    return im
+
+
+# ------------------------------------------------------------------ GeoTIFF lesen (tifffile)
+def geotiff(daten):
+    import tifffile
+    with tifffile.TiffFile(io.BytesIO(daten)) as tf:
+        pg = tf.pages[0]; a = pg.asarray().astype(np.float64)
+        if a.ndim == 3:
+            a = a[..., 0] if a.shape[-1] < a.shape[0] else a[0]
+        tg = pg.tags
+        sx, sy = tg['ModelPixelScaleTag'].value[:2]
+        tp = tg['ModelTiepointTag'].value; i0, j0, x0, y0 = tp[0], tp[1], tp[3], tp[4]
+        punkt = False
+        if 'GeoKeyDirectoryTag' in tg:
+            g = tg['GeoKeyDirectoryTag'].value
+            for k in range(4, len(g), 4):
+                if g[k] == 1025 and g[k + 3] == 2:
+                    punkt = True
+        nod = None
+        if 'GDAL_NODATA' in tg:
+            try:
+                nod = float(str(tg['GDAL_NODATA'].value).strip('\x00 '))
+            except ValueError:
+                pass
+    if nod is not None:
+        a[a == nod] = np.nan
+    a[~np.isfinite(a)] = np.nan
+    # Pixelmittelpunkt-Koordinaten: lon = lon0 + (col)*sx, lat = lat0 - (row)*sy
+    lon0 = x0 - i0 * sx + (0 if punkt else sx / 2); lat0 = y0 + j0 * sy - (0 if punkt else sy / 2)
+    return dict(a=a, lon0=lon0, lat0=lat0, sx=sx, sy=sy)
+
+
+def abtasten(r, lon, lat, sammel=None):
+    """Bilinear, NaN-tolerant. Mit sammel=(acc, wsum) werden mehrere Kacheln nahtlos gemittelt."""
+    a = r['a']; ny, nx = a.shape
+    c = (lon - r['lon0']) / r['sx']; z = (r['lat0'] - lat) / r['sy']
+    c0 = np.floor(c).astype(int); z0 = np.floor(z).astype(int); fc = c - c0; fz = z - z0
+    out = np.full(lon.shape, np.nan)
+    acc, wsum = sammel if sammel else (np.zeros(lon.shape), np.zeros(lon.shape))
+    for dz, dc, wgt in ((0, 0, (1 - fz) * (1 - fc)), (0, 1, (1 - fz) * fc), (1, 0, fz * (1 - fc)), (1, 1, fz * fc)):
+        zz = z0 + dz; cc = c0 + dc; ok = (zz >= 0) & (zz < ny) & (cc >= 0) & (cc < nx)
+        v = np.full(lon.shape, np.nan); v[ok] = a[zz[ok], cc[ok]]
+        g = np.isfinite(v) & (wgt > 0)
+        acc[g] += v[g] * wgt[g]; wsum[g] += wgt[g]
+    m = wsum > 0.25
+    out[m] = acc[m] / wsum[m]
+    return out
+
+
+def fuellen(v, maske_ok):
+    """NaN-Zellen (innerhalb maske_ok) mit nächstem gültigem Wert füllen."""
+    from scipy import ndimage
+    gut = np.isfinite(v)
+    if not gut.any():
+        return v
+    idx = ndimage.distance_transform_edt(~gut, return_distances=False, return_indices=True)
+    f = v[tuple(idx)]
+    return np.where(maske_ok & ~gut, f, v)
+
+
+# ------------------------------------------------------------------ Tiefe + Höhe
+def gelaende(netz, geb, cfg, wasser_im):
+    from scipy import ndimage
+    cs = cfg['zelle']; nx, ny = geb.W // cs, geb.H // cs
+    xs = (np.arange(nx) + 0.5) * cs; ys = geb.H - (np.arange(ny) + 0.5) * cs     # Zeile 0 = Norden
+    gx, gy = np.meshgrid(xs, ys)
+    lon, lat = geb.to_ll(gx, gy)
+    wm = np.asarray(wasser_im.resize((nx, ny), Image.BILINEAR)) >= 128
+    quellen = {}
+
+    # --- Tiefe EMODnet
+    w, s, e, n = geb.llbox(1500)
+    log('EMODnet-Tiefen laden …')
+    tiefe = np.full(gx.shape, np.nan)
+    d = netz.datei('emodnet.tif', EMODNET_WCS, params={
+        'SERVICE': 'WCS', 'VERSION': '2.0.1', 'REQUEST': 'GetCoverage', 'CoverageId': 'emodnet__mean',
+        'SUBSET': [f'Lat({s:.5f},{n:.5f})', f'Long({w:.5f},{e:.5f})'], 'FORMAT': 'image/tiff'})
+    if d:
+        try:
+            r = geotiff(d); tiefe = abtasten(r, lon, lat)
+            sw = tiefe[wm & np.isfinite(tiefe)]
+            if sw.size and np.median(sw) > 0:
+                tiefe = -tiefe; log('  Vorzeichen umgedreht (Tiefen positiv geliefert)')
+            quellen['tiefe'] = 'EMODnet DTM (emodnet:mean, ca. 115 m), bilinear auf %d m' % cs
+        except Exception as ex:
+            warn(f'EMODnet-Datei nicht lesbar: {ex}')
+    else:
+        warn('Keine EMODnet-Tiefen – Tiefe wird aus Uferabstand geschätzt (Modell, KEINE Messung)')
+    dist = ndimage.distance_transform_edt(wm) * cs        # Abstand zum Land in m (Wasserzellen)
+    if not np.isfinite(tiefe[wm]).any():
+        tiefe = -np.minimum(0.5 + dist * 0.02, 12.0)
+        quellen['tiefe'] = 'Modellschätzung aus Uferabstand (2 %, max. 12 m) – KEINE Messung'
+    tiefe = fuellen(tiefe, wm)
+    tiefe = np.where(np.isfinite(tiefe), tiefe, -1.0)
+    tiefe = np.minimum(tiefe, -0.3)
+    if cfg.get('hang', 0) > 0:
+        tiefe = np.maximum(tiefe, -(0.3 + dist * cfg['hang']))
+
+    # --- Höhe Copernicus GLO-30
+    log('Copernicus-Höhen laden …')
+    hoehe = np.full(gx.shape, np.nan); ok = False
+    acc, wsum = np.zeros(gx.shape), np.zeros(gx.shape)
+    for la in range(int(math.floor(s)), int(math.floor(n)) + 1):
+        for lo in range(int(math.floor(w)), int(math.floor(e)) + 1):
+            nm = f'Copernicus_DSM_COG_10_{"N" if la >= 0 else "S"}{abs(la):02d}_00_{"E" if lo >= 0 else "W"}{abs(lo):03d}_00_DEM'
+            dd = netz.datei(nm + '.tif', COP30.format(n=nm))
+            if not dd:
+                continue
+            try:
+                r = geotiff(dd); abtasten(r, lon, lat, (acc, wsum)); ok = True
+            except Exception as ex:
+                warn(f'{nm} nicht lesbar: {ex}')
+    m = wsum > 0.25
+    hoehe[m] = acc[m] / wsum[m]
+    if ok:
+        quellen['hoehe'] = 'Copernicus DEM GLO-30 (Oberflächenmodell inkl. Wald/Gebäude), bilinear auf %d m' % cs
+    else:
+        warn('Keine Geländehöhen – Land wird flach (1 m) angenommen')
+        quellen['hoehe'] = 'keine Daten (flach 1 m)'
+    hoehe = fuellen(hoehe, ~wm)
+    hoehe = np.where(np.isfinite(hoehe), hoehe, 1.0)
+    hoehe = np.maximum(hoehe, 0.3)
+
+    z = np.where(wm, tiefe, hoehe)
+    cm = np.clip(np.round(z * 100), -32767, 32767).astype('<i2')
+    return cm, wm, quellen, (nx, ny)
+
+
+# ------------------------------------------------------------------ Seezeichen
+def seezeichen(netz, geb):
+    log('Seezeichen laden …')
+    w, s, e, n = geb.llbox(500)
+    d = netz.overpass('seezeichen', f'[out:json][timeout:200];nwr["seamark:type"]({s},{w},{n},{e});out tags geom;')
+    pkt, lin = [], []
+    for el in d['elements']:
+        t = el.get('tags', {}); typ = t.get('seamark:type', '')
+        p = lambda k: t.get(f'seamark:{typ}:{k}', '')
+        info = {k: v for k, v in dict(
+            typ=typ, name=t.get('seamark:name') or t.get('name', ''), farbe=p('colour'), muster=p('colour_pattern'),
+            form=p('shape'), kategorie=p('category'), toppzeichen=t.get('seamark:topmark:shape', ''),
+            licht=' '.join(x for x in (t.get('seamark:light:character', ''), t.get('seamark:light:colour', ''),
+                                       (t.get('seamark:light:period', '') + 's') if t.get('seamark:light:period') else '') if x),
+            osm=f"{el['type'][0]}{el['id']}").items() if v}
+        if el['type'] == 'node':
+            x, y = geb.to_m(el['lon'], el['lat'])
+            if 0 <= x <= geb.W and 0 <= y <= geb.H:
+                pkt.append({**info, 'x': round(float(x), 1), 'y': round(float(y), 1)})
+        elif el.get('geometry'):
+            lo, la = np.array([(q['lon'], q['lat']) for q in el['geometry']]).T
+            x, y = geb.to_m(lo, la)
+            lin.append({**info, 'p': [[round(a, 1), round(b, 1)] for a, b in zip(x.tolist(), y.tolist())]})
+    log(f'  {len(pkt)} Seezeichen, {len(lin)} Linien/Flächen')
+    return pkt, lin
+
+
+# ------------------------------------------------------------------ Umgebung
+FL_NAT = {'wood': 'forest', 'scrub': 'scrub', 'heath': 'scrub', 'wetland': 'wetland', 'beach': 'beach', 'sand': 'beach',
+          'grassland': 'grass', 'water': 'water', 'cliff': 'cliff', 'bare_rock': 'beach'}
+FL_LU = {'forest': 'forest', 'farmland': 'farmland', 'meadow': 'grass', 'grass': 'grass', 'residential': 'urban',
+         'commercial': 'urban', 'industrial': 'urban', 'retail': 'urban', 'allotments': 'grass', 'orchard': 'farmland',
+         'farmyard': 'urban', 'harbour': 'harbor', 'port': 'harbor', 'recreation_ground': 'grass', 'cemetery': 'grass',
+         'reservoir': 'water', 'basin': 'water', 'military': 'other', 'construction': 'urban', 'railway': 'urban',
+         'village_green': 'grass', 'plant_nursery': 'farmland', 'vineyard': 'farmland', 'greenfield': 'grass', 'brownfield': 'urban'}
+HW_ROAD = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'service', 'living_street',
+           'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link'}
+
+
+def klasse(t):
+    if 'building' in t: return 'building'
+    if t.get('place'): return 'place'
+    if t.get('man_made') == 'lighthouse' or t.get('seamark:type') == 'light_major': return 'lighthouse'
+    if t.get('man_made') in ('pier', 'breakwater', 'groyne', 'quay'): return 'pier'
+    if t.get('man_made') == 'bridge' or t.get('bridge') == 'yes' and 'highway' not in t: return 'bridge'
+    if t.get('man_made') == 'tower': return 'tower'
+    if t.get('leisure') in ('marina', 'slipway') or 'harbour' in t: return 'harbor'
+    if t.get('waterway'): return 'waterway'
+    if t.get('railway') == 'rail': return 'rail'
+    if t.get('highway') in HW_ROAD: return 'road'
+    if t.get('highway'): return 'path'
+    if t.get('natural') in FL_NAT: return FL_NAT[t['natural']]
+    if t.get('landuse') in FL_LU: return FL_LU[t['landuse']]
+    if t.get('natural') == 'tree': return 'tree'
+    return 'other'
+
+
+def hoehe_von(c, t, std):
+    try:
+        if t.get('height'): return float(str(t['height']).replace('m', '').replace(',', '.').split(';')[0]), 'tag'
+    except ValueError:
+        pass
+    try:
+        if t.get('building:levels'): return float(t['building:levels'].replace(',', '.')) * 3 + 1, 'levels'
+    except ValueError:
+        pass
+    return {'building': std['gebaeude'], 'forest': std['wald'], 'scrub': 2.0, 'tree': 8.0, 'lighthouse': 20.0, 'tower': 15.0}.get(c, 0.0), 'default'
+
+
+FLAECHENTAGS = ('building', 'landuse', 'leisure', 'amenity', 'harbour', 'place')
+
+
+def ist_flaeche(t, zu):
+    if not zu: return False
+    if t.get('area') == 'yes': return True
+    if t.get('area') == 'no' or 'highway' in t or 'barrier' in t or 'waterway' in t and t.get('waterway') not in ('riverbank', 'dock'): return False
+    if t.get('natural') in ('cliff', 'tree_row', 'coastline'): return False
+    if t.get('man_made') in ('pier', 'breakwater', 'groyne'): return True
+    return any(k in t for k in FLAECHENTAGS) or t.get('natural') in FL_NAT
+
+
+def umgebung(netz, geb, std):
+    w, s, e, n = geb.llbox(800)
+    sch = 0.08
+    ni, nj = max(1, math.ceil((e - w) / sch)), max(1, math.ceil((n - s) / sch))
+    log(f'Umgebung laden ({ni}×{nj} Abfragen) …')
+    feats, seen = [], set()
+    flat = lambda P: [v for p in P for v in (int(round(p[0])), int(round(p[1])))]
+    for i in range(ni):
+        for j in range(nj):
+            bw, be_ = w + i * (e - w) / ni, w + (i + 1) * (e - w) / ni
+            bs, bn = s + j * (n - s) / nj, s + (j + 1) * (n - s) / nj
+            b = f'{bs:.5f},{bw:.5f},{bn:.5f},{be_:.5f}'
+            q = (f'[out:json][timeout:300];('
+                 f'nwr["landuse"]({b});'
+                 f'nwr["natural"~"^(wood|scrub|heath|wetland|beach|sand|grassland|water|cliff|bare_rock)$"]({b});'
+                 f'way["building"]({b});'
+                 f'way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|living_street|track|path|footway|cycleway|bridleway|steps|pedestrian)(_link)?$"]({b});'
+                 f'way["railway"="rail"]({b});'
+                 f'nwr["leisure"~"^(marina|slipway)$"]({b});'
+                 f'nwr["man_made"~"^(pier|breakwater|groyne|quay|lighthouse|tower|bridge)$"]({b});'
+                 f'nwr["harbour"]({b});'
+                 f'way["waterway"~"^(river|canal|stream|ditch|dock)$"]({b});'
+                 f'node["place"~"^(city|town|village|hamlet|isolated_dwelling|island|islet|locality|peninsula)$"]({b});'
+                 f'node["natural"~"^(peak|cape)$"]["name"]({b});'
+                 f');out tags geom;')
+            d = netz.overpass(f'umgebung_{i}_{j}', q)
+            for el in d['elements']:
+                uid = el['type'][0] + str(el['id'])
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                t = el.get('tags', {}); c = klasse(t)
+                if c == 'other' and t.get('natural') not in ('peak', 'cape'):
+                    continue
+                if t.get('natural') in ('peak', 'cape'): c = 'place'
+                h, hs = hoehe_von(c, t, std)
+                f = dict(c=c, osm=uid)
+                if t.get('name'): f['n'] = t['name']
+                if h: f['h'] = round(h, 1); f['hs'] = hs
+                sub = t.get('highway') or t.get('place') or t.get('landuse') or t.get('natural') or t.get('man_made') or t.get('leisure') or t.get('waterway')
+                if sub: f['s'] = sub
+                if el['type'] == 'node':
+                    x, y = geb.to_m(el['lon'], el['lat'])
+                    f['t'] = 'N'; f['g'] = [int(round(float(x))), int(round(float(y)))]
+                elif el['type'] == 'way' and el.get('geometry'):
+                    lo, la = np.array([(q['lon'], q['lat']) for q in el['geometry']]).T
+                    x, y = geb.to_m(lo, la); P = np.c_[x, y]
+                    zu = len(P) > 3 and np.allclose(P[0], P[-1])
+                    if ist_flaeche(t, zu):
+                        P = dp_ring(P, 1.5 if c == 'building' else 3)
+                        if len(P) < 3: continue
+                        f['t'] = 'P'; f['g'] = [flat(P)]
+                    else:
+                        P = dp(P, 2)
+                        f['t'] = 'L'; f['g'] = flat(P)
+                elif el['type'] == 'relation':
+                    au, inn = [], []
+                    for m in el.get('members', []):
+                        if m.get('type') == 'way' and m.get('geometry'):
+                            (inn if m.get('role') == 'inner' else au).append([(q['lon'], q['lat']) for q in m['geometry']])
+                    ringe = []
+                    for lst, rolle in ((au, 'o'), (inn, 'i')):
+                        for cc, zu in ketten(lst, False):
+                            if not zu or len(cc) < 4: continue
+                            lo, la = np.array(cc).T; x, y = geb.to_m(lo, la)
+                            P = dp_ring(np.c_[x, y], 3)
+                            if len(P) >= 3: ringe.append((rolle, P))
+                    outs = [P for r, P in ringe if r == 'o']
+                    if not outs: continue
+                    polys = [[P] for P in outs]
+                    for r, P in ringe:
+                        if r == 'i':
+                            for pl in polys:
+                                if im_poly(P[0], pl[0]): pl.append(P); break
+                    for k, pl in enumerate(polys):
+                        g = dict(f); g['t'] = 'P'; g['g'] = [flat(R) for R in pl]
+                        if k: g['osm'] = f'{uid}.{k}'
+                        feats.append(g)
+                    continue
+                else:
+                    continue
+                feats.append(f)
+    # grob auf Revier (+800 m) beschränken
+    def drin(f):
+        g = f['g']
+        if f['t'] == 'N': xs, ys = [g[0]], [g[1]]
+        elif f['t'] == 'L': xs, ys = g[0::2], g[1::2]
+        else: xs, ys = g[0][0::2], g[0][1::2]
+        return max(xs) >= -800 and min(xs) <= geb.W + 800 and max(ys) >= -800 and min(ys) <= geb.H + 800
+    feats = [f for f in feats if drin(f)]
+    reihen = ['farmland', 'grass', 'urban', 'wetland', 'beach', 'scrub', 'forest', 'harbor', 'water', 'waterway', 'cliff', 'path', 'road', 'rail', 'pier', 'bridge', 'building', 'tower', 'lighthouse', 'tree', 'place']
+    feats.sort(key=lambda f: reihen.index(f['c']) if f['c'] in reihen else 99)
+    z = {}
+    for f in feats: z[f['c']] = z.get(f['c'], 0) + 1
+    log('  ' + ', '.join(f'{k} {v}' for k, v in z.items()))
+    return feats
+
+
+# ------------------------------------------------------------------ Vorschau
+def vorschau(cm, wm, teile, nx, ny, pfad):
+    z = cm.astype(float) / 100
+    img = np.zeros((ny, nx, 3), np.uint8)
+    t = -z
+    stufen = [(1, (120, 170, 215)), (2, (150, 192, 228)), (5, (185, 214, 238)), (10, (214, 232, 246)), (1e9, (236, 244, 251))]
+    for i, (g, col) in enumerate(stufen[::-1]):
+        img[wm & (t < g)] = col
+    gy, gx = np.gradient(z)
+    hs = np.clip(0.75 + (gx - gy) * 0.35, 0.35, 1.15)
+    land = np.array([226, 214, 178]) * hs[..., None]
+    img[~wm] = np.clip(land[~wm], 0, 255).astype(np.uint8)
+    Image.fromarray(img).save(pfad, optimize=True)
+
+
+# ------------------------------------------------------------------ Hauptprogramm
+def main():
+    ap = argparse.ArgumentParser(description='Seekoje Revier-Bauer')
+    ap.add_argument('revier', nargs='?', default='hiddensee', choices=sorted(REVIERE))
+    ap.add_argument('--cache', default='.revier-cache', help='Zwischenspeicher für Downloads')
+    ap.add_argument('--offline', action='store_true', help='nur Zwischenspeicher verwenden (Test)')
+    ap.add_argument('--ohne-umgebung', action='store_true')
+    ap.add_argument('--aus', default='.', help='Ausgabeordner')
+    a = ap.parse_args()
+    cfg = REVIERE[a.revier]; r = a.revier
+    geb = Gebiet(cfg['bbox'], cfg['zelle'])
+    log(f'Revier {cfg["name"]}: {geb.W / 1000:.1f} × {geb.H / 1000:.1f} km, Ursprung UTM33 {geb.ox} / {geb.oy}')
+    netz = Netz(a.cache, a.offline)
+
+    teile, land, wf = kueste(netz, geb, cfg)
+    mim = maske(teile, geb.W, geb.H, cfg['maske'])
+    cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim)
+    pkt, lin = seezeichen(netz, geb)
+    std = dict(gebaeude=8.0, wald=15.0)
+    env = [] if a.ohne_umgebung else umgebung(netz, geb, std)
+
+    o84 = geb.to_ll(0, 0); n84 = geb.to_ll(geb.W, geb.H)
+    rnd = lambda P: [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in P]
+    zt = cm[wm].astype(float) / 100
+    meta = dict(
+        format='seekoje-revier-1', revier=r, name=cfg['name'], regatten=cfg.get('regatten', []),
+        erstellt=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
+        hinweis='KEINE Navigationskarte. Tiefen grob (ca. 115 m Quellraster) und geglättet, Stand der Quelldaten unbekannt.',
+        attribution=ATTRIBUTION,
+        license_note='Abgeleitete Datenbank aus OpenStreetMap (ODbL 1.0): bei Weitergabe unter ODbL stellen. Im Spiel sichtbar nennen.',
+        crs='EPSG:25833', units='m', axes='x = Ost, y = Nord, Ursprung = Südwest-Ecke des Reviers',
+        origin_utm=dict(x=geb.ox, y=geb.oy), size=dict(w=geb.W, h=geb.H),
+        bbox_wgs84=dict(west=round(float(o84[0]), 6), south=round(float(o84[1]), 6), east=round(float(n84[0]), 6), north=round(float(n84[1]), 6)),
+        origin_wgs84=dict(lon=round(float(o84[0]), 6), lat=round(float(o84[1]), 6)),
+        grid=dict(file=f'{r}-gelaende.bin', type='int16 little-endian', unit='cm (über/unter NHN ≈ Mittelwasser Ostsee)',
+                  cellsize=cfg['zelle'], ncols=nx, nrows=ny, order='Zeile 0 = Norden, Spalten West → Ost; Zellmittelpunkte',
+                  lowerLeft=dict(x=0, y=0), quellen=quellen,
+                  tiefe_min_m=round(float(zt.min()), 2) if zt.size else None, tiefe_mittel_m=round(float(zt.mean()), 2) if zt.size else None,
+                  hoehe_max_m=round(float(cm[~wm].max()) / 100, 1) if (~wm).any() else None),
+        mask=dict(file=f'{r}-maske.png', cellsize=cfg['maske'], ncols=mim.size[0], nrows=mim.size[1], north='oben', white='Wasser', black='Land'),
+        environment=dict(file=f'{r}-umgebung.json', count=len(env)),
+        water=[dict(outer=rnd(t['outer']), islands=[rnd(i) for i in t['islands']]) for t in teile],
+        water_area_km2=round(wf / 1e6, 2), simplify_m=cfg['ufer_tol'],
+        land=[rnd(L) for L in land],
+        seamarks=pkt, seamark_lines=lin,
+        warnungen=WARN,
+    )
+    os.makedirs(a.aus, exist_ok=True)
+    P = lambda s: os.path.join(a.aus, f'{r}-{s}')
+    json.dump(meta, open(P('revier.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+    open(P('gelaende.bin'), 'wb').write(cm.tobytes())
+    mim.convert('1').save(P('maske.png'), optimize=True)
+    json.dump(dict(format='seekoje-umgebung-1', revier=r, attribution=ATTRIBUTION[:1],
+                   legende='t: N=Punkt [x,y], L=Linie [x,y,x,y…], P=Fläche [[Außenring],[Loch]…] als flache Listen in m; '
+                           'c=Klasse, s=OSM-Unterart, n=Name, h=Höhe m, hs=Höhenquelle',
+                   features=env),
+              open(P('umgebung.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+    vorschau(cm, wm, teile, nx, ny, P('vorschau.png'))
+    open(P('namensnennung.txt'), 'w', encoding='utf-8').write(
+        f'Revier {cfg["name"]} – Datenquellen (im Spiel sichtbar nennen)\n\n' + '\n'.join(ATTRIBUTION) +
+        '\n\nHinweise:\n- OpenStreetMap: Die Revierdateien sind eine abgeleitete Datenbank (ODbL 1.0). Bilder/Spielszenen daraus sind „Produced Work“ und brauchen die Nennung.\n'
+        '- EMODnet und Copernicus DEM: Namensnennung nötig.\n- KEINE Navigationskarte. Keine Rechtsberatung.\n')
+    gr = {s: os.path.getsize(P(s)) for s in ('revier.json', 'gelaende.bin', 'umgebung.json', 'maske.png', 'vorschau.png')}
+    log('Fertig: ' + ', '.join(f'{r}-{k} {v / 1e6:.1f} MB' for k, v in gr.items()))
+    zs = os.environ.get('GITHUB_STEP_SUMMARY')
+    if zs:
+        with open(zs, 'a', encoding='utf-8') as f:
+            f.write(f'## Revier {cfg["name"]}\n\n- Fläche {geb.W / 1000:.1f} × {geb.H / 1000:.1f} km, Wasser {wf / 1e6:.1f} km²\n'
+                    f'- {len(pkt)} Seezeichen, {len(env)} Umgebungsobjekte\n- Tiefe: {quellen.get("tiefe")}\n- Höhe: {quellen.get("hoehe")}\n'
+                    + ''.join(f'- ⚠️ {w}\n' for w in WARN) + f'\n![Vorschau]({r}-vorschau.png)\n')
+
+
+if __name__ == '__main__':
+    main()
