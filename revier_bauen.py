@@ -83,6 +83,20 @@ REVIERE['ruegen']['feuer_extra'] = [
          f=dict(c='LFl', p=10, s='2.4+(7.6)', k='white', r=24)),
 ]
 # Häfen mit feinem Ausschnitt (4 m) für Kais, Molen und Stege
+REVIERE['ruegen']['bruecken'] = [
+    # Rügenbrücke (2007): Schrägseilbrücke, Pylon 128 m, Hauptfelder 126 m + 198 m, Durchfahrtshöhe 42 m
+    dict(name='Rügenbrücke', art='schraegseil', bbox=(13.093, 54.298, 13.137, 54.321), wahl=dict(s=['trunk']),
+         pylon_osm='Rügenbrücke', felder=[126, 198], hoehe=45, pylon_h=128),
+    # Rügendamm (1936) mit Ziegelgrabenbrücke (Klappbrücke); Öffnungszeiten laut BOOTE/YACHT 2025, je 20 min
+    dict(name='Rügendamm', art='damm', bbox=(13.093, 54.298, 13.137, 54.321), wahl=dict(n='Rügendamm'), hoehe=6,
+         klappe=dict(name='Ziegelgrabenbrücke', breite=32, zeiten=['05:20', '08:20', '12:20', '15:20', '17:20', '21:30'], dauer=20)),
+    # Peenebrücke Wolgast (1997): Klapp-/Wippbrücke für Straße B 111 und Bahn, 256 m, Klappe 42 m, Durchfahrt 30,75 m breit (mageba);
+    # Öffnungen 16.3.–15.10. laut YACHT, außerhalb davon unbekannt – hier ganzjährig angenommen
+    dict(name='Peenebrücke Wolgast', art='klapp', bbox=(13.7775, 54.0512, 13.7942, 54.0586),
+         wahl=dict(n=['Peenebrücke', 'Peenemünder Straße', 'Straße der Freundschaft'], s=['primary']), hoehe=6,
+         klappe=dict(name='Peenebrücke Wolgast', osm='Peenebrücke Wolgast', laenge=42, breite=19, art='wippe', dauer=15,
+                     zeiten=['05:45', '07:45', '12:45', '17:45', '20:45', dict(z='23:45', von=[6, 1], bis=[9, 30])])),
+]
 REVIERE['ruegen']['haefen'] = [
     dict(name='Stralsund', mitte=(13.09864, 54.31611), groesse=2800),
     dict(name='Sassnitz', mitte=(13.64112, 54.50949), groesse=2400),

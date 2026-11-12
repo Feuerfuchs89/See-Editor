@@ -186,6 +186,152 @@ def flaeche(P):
 
 
 # ------------------------------------------------------------------ Export
+# --- Wahrzeichen: benannte Bauwerke, die man von See aus erkennt
+WZ_ART = [
+    (r'Parkhaus|^TrS|Trafo|Hotel|Kiosk|Shop|Schule|Kita|Wohnheim|[Kk]ontor|Strandhaus', None),
+    (r'U-\d+|H\.M\.S\.|U-Boot', 'uboot'),
+    (r'Gorch Fock', 'bark'),
+    (r'Museumsschiff|^MS |Feuerschiff', 'schiff'),
+    (r'Ozeaneum', 'ozeaneum'),
+    (r'Glasbahnhof|Fährterminal', 'glas'),
+    (r'Kraftwerk|Speicher|Magazin|Brecherhaus|Heizhaus', 'backstein'),
+    (r'Neuapostol|Königreichssaal|Freikirch|Gemeinschaft|Gemeindehaus|Baptist|Parkhaus|^TrS|Trafo|Station|Hotel|Kiosk|Shop|Schule|Kita|Wohn', None),
+    (r'[Kk]irche|^Dom |\bDom\b|Kapelle|Münster|Kloster', 'kirche'),
+    (r'[a-zäöü]tor$|Tor$', 'tor'),
+    (r'Rathaus', 'rathaus'),
+    (r'[Ss]chloss|Burg\b', 'schloss'),
+    (r'[Tt]urm$|Turm\b', 'turm'),
+]
+# Bekannte Bauten: Maße nach Recherche (Wikipedia/Structurae), gerundet; Lage dient nur der Zuordnung (Radius 500 m)
+WZ_SPEZ = [
+    dict(re=r'Marien', pos=(13.0884, 54.3110), turm=104, helm='barock', schiff=32, westwerk=True),     # St. Marien Stralsund
+    dict(re=r'Nikolai', pos=(13.0915, 54.3156), turm=103, helm='barock', schiff=29, tuerme=2, turm2=66), # St. Nikolai Stralsund
+    dict(re=r'Jakobi', pos=(13.0935, 54.3135), turm=68, helm='spitz', schiff=24),                      # St. Jakobi Stralsund
+    dict(re=r'Katharinen', pos=(13.0855, 54.3128), turm=0, schiff=22),                                  # Katharinenkloster
+    dict(re=r'Dom St\. Nikolai', pos=(13.3770, 54.0960), turm=100, helm='barock', schiff=26),           # Greifswalder Dom
+    dict(re=r'Marien', pos=(13.3835, 54.0957), turm=58, helm='flach', schiff=24),                       # „Dicke Marie“ Greifswald
+    dict(re=r'Jagdschloss Granitz', pos=(13.6269, 54.3804), turm=38, h=18),
+    dict(re=r'Altes Rathaus', pos=(13.0900, 54.3152), h=24),
+    dict(re=r'Ozeaneum', pos=(13.0975, 54.3155), h=20),
+    dict(re=r'Kraftwerk', pos=(13.7650, 54.1440), h=24),
+    dict(re=r'Gorch Fock', pos=(13.0985, 54.3165), l=82, masten=[41, 44, 36]),
+]
+
+def wahrzeichen(env, cfg, ll2m, wdist):
+    import re as _re
+    spez = [dict(d, _xy=ll2m(*d['pos'])) for d in WZ_SPEZ + list(cfg.get('wahrzeichen_extra', []))]
+    out, seen = [], set()
+    for ft in env:
+        n = ft.get('n') or ''
+        if ft.get('c') != 'building' or ft.get('t') != 'P' or not n or ft.get('s') == 'lighthouse':
+            continue
+        art = next((a for rx, a in WZ_ART if _re.search(rx, n)), 'none')
+        if ft.get('s') in ('tower', 'water_tower') and art == 'none':
+            art = 'turm'
+        if art in ('none', None):
+            continue
+        g = np.array(ft['g'][0], float).reshape(-1, 2)
+        if len(g) < 3:
+            continue
+        c = g.mean(0)
+        if wdist(*c) > 6000:
+            continue
+        key = (n, int(c[0] // 50), int(c[1] // 50))
+        if key in seen:
+            continue
+        seen.add(key)
+        if len(g) > 40:
+            g = np.array(dp_ring([tuple(q) for q in g], 1.5), float) if len(g) > 3 else g
+        w = dict(n=n, art=art, x=int(round(c[0])), y=int(round(c[1])), h=round(float(ft.get('h') or 8), 1),
+                 g=[int(round(v)) for v in g.reshape(-1)])
+        for d in spez:
+            if _re.search(d['re'], n) and math.hypot(c[0] - d['_xy'][0], c[1] - d['_xy'][1]) < 500:
+                w.update({k: v for k, v in d.items() if k not in ('re', 'pos', '_xy')})
+                break
+        out.append(w)
+    return out
+
+def bruecken(env, meta, cfg, ll2m):
+    """Brücken aus OSM-Straßen verketten, alle 6 m abtasten und Wasser/Land markieren."""
+    out = []
+    for bd in cfg.get('bruecken', []):
+        (ax, ay), (bx, by) = ll2m(*bd['bbox'][:2]), ll2m(*bd['bbox'][2:])
+        x0, y0, x1, y1 = min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
+        wahl = bd['wahl']; kanten = {}
+        def knoten(x, y):
+            return (round(x), round(y))
+        for f_ in env:
+            if f_.get('c') != 'road' or f_.get('t') != 'L':
+                continue
+            if 'n' in wahl and f_.get('n') not in (wahl['n'] if isinstance(wahl['n'], list) else [wahl['n']]):
+                continue
+            if 's' in wahl and f_.get('s') not in wahl['s']:
+                continue
+            g = f_['g']; P = [(g[k], g[k + 1]) for k in range(0, len(g) - 1, 2)]
+            if not all(x0 <= q[0] <= x1 and y0 <= q[1] <= y1 for q in P):
+                continue
+            for a_, b_ in zip(P, P[1:]):
+                A, B = knoten(*a_), knoten(*b_)
+                if A != B:
+                    kanten.setdefault(A, set()).add(B); kanten.setdefault(B, set()).add(A)
+        if not kanten:
+            log(f'  WARNUNG Brücke {bd["name"]}: keine Straße gefunden'); continue
+        # längster Weg (kleiner Graph): Tiefensuche ab jedem Endknoten
+        best = (0, [])
+        enden = [k for k, v in kanten.items() if len(v) == 1] or list(kanten)
+        sys.setrecursionlimit(10000)
+        def dfs(k, besucht, laenge, weg):
+            nonlocal best
+            if laenge > best[0]:
+                best = (laenge, list(weg))
+            for n2 in kanten[k]:
+                if n2 not in besucht:
+                    besucht.add(n2); weg.append(n2)
+                    dfs(n2, besucht, laenge + math.hypot(n2[0] - k[0], n2[1] - k[1]), weg)
+                    weg.pop(); besucht.discard(n2)
+        for e in enden:
+            dfs(e, {e}, 0, [e])
+        W_ = best[1]
+        if W_[0][0] > W_[-1][0]:
+            W_ = W_[::-1]                     # von West nach Ost
+        # abtasten
+        pts = [W_[0]]
+        for a_, b_ in zip(W_, W_[1:]):
+            d = math.hypot(b_[0] - a_[0], b_[1] - a_[1]); n = max(1, int(d // 6))
+            for k in range(1, n + 1):
+                pts.append((a_[0] + (b_[0] - a_[0]) * k / n, a_[1] + (b_[1] - a_[1]) * k / n))
+        # Land/Wasser genau aus der Küstenlinie (2-m-Raster)
+        cs2 = 2.0; nx_, ny_ = int((x1 - x0) / cs2) + 1, int((y1 - y0) / cs2) + 1
+        im = Image.new('L', (nx_, ny_), 0); dr = ImageDraw.Draw(im)
+        for ring in meta['land']:
+            xs = [q[0] for q in ring]; ys = [q[1] for q in ring]
+            if max(xs) < x0 or min(xs) > x1 or max(ys) < y0 or min(ys) > y1:
+                continue
+            dr.polygon([((q[0] - x0) / cs2, (y1 - q[1]) / cs2) for q in ring], fill=1)
+        lm = np.asarray(im)
+        nass = [0 if lm[min(ny_ - 1, max(0, int((y1 - q[1]) / cs2))), min(nx_ - 1, max(0, int((q[0] - x0) / cs2)))] else 1 for q in pts]
+        b = dict(n=bd['name'], art=bd['art'], pts=[int(round(v)) for q in pts for v in q], nass=nass,
+                 laenge=int(best[0]), **{k: v for k, v in bd.items() if k not in ('bbox', 'wahl', 'name', 'art', 'pylon_osm')})
+        if bd.get('pylon_osm'):          # Pylon aus der OSM-Brückenlinie mit Höhe (Hauptfelder)
+            for f_ in env:
+                if f_.get('c') == 'bridge' and f_.get('t') == 'L' and f_.get('n') == bd['pylon_osm'] and float(f_.get('h') or 0) >= 30:
+                    g = f_['g']; Q = [(g[k], g[k + 1]) for k in range(0, len(g) - 1, 2)]
+                    A, B = max(((a_, b_) for a_ in Q for b_ in Q), key=lambda ab: math.hypot(ab[1][0] - ab[0][0], ab[1][1] - ab[0][1]))
+                    if A[0] > B[0]:
+                        A, B = B, A
+                    L_ = math.hypot(B[0] - A[0], B[1] - A[1]); t_ = bd.get('felder', [126, 198])[0] / max(1, L_)
+                    b['pylon'] = [round(A[0] + (B[0] - A[0]) * t_), round(A[1] + (B[1] - A[1]) * t_)]
+                    b['hauptfeld'] = [round(A[0]), round(A[1]), round(B[0]), round(B[1])]
+                    break
+        kl = bd.get('klappe') or {}
+        if kl.get('osm'):                 # Lage der Klappe aus OSM (z. B. waterway=drawbridge)
+            for f_ in env:
+                if f_.get('n') == kl['osm'] and f_.get('t') == 'N':
+                    b['klappe'] = dict(kl, pos=[round(f_['g'][0]), round(f_['g'][1])]); break
+        out.append(b)
+        log(f'  Brücke {bd["name"]}: {best[0]:.0f} m, {sum(nass) * 6:.0f} m über Wasser' + (f', Pylon {b["pylon"]}' if 'pylon' in b else ''))
+    return out
+
 def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
     """cm: int16-Raster in cm (Zeile 0 = Norden) mit Zellgröße cs; env: Umgebungsobjekte (mit Gebäuden);
     utm/geo: Umrechnung Länge/Breite <-> UTM33."""
@@ -372,6 +518,9 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         if ex.get('f') and not any(math.hypot(ex_x - q['x'], ex_y - q['y']) < 150 and q['f'].get('c') for q in feuer):
             feuer.append(dict(x=round(ex_x), y=round(ex_y), h=ex.get('h', 30), typ='light_major', name=ex['name'], f=ex['f'], quelle='Recherche'))
     log(f'  {len(feuer)} Feuer mit Kennung, {len(tuerme)} Leuchttürme/Feuerträger')
+    wahrz = wahrzeichen(env, cfg, ll2m, wdist)
+    brk = bruecken(env, meta, cfg, ll2m)
+    log(f'  {len(wahrz)} Wahrzeichen (Kirchen, Tore, Museen, Schiffe …)')
     # --- Hafen-Ausschnitte (4 m)
     haefen = []
     for alt in glob.glob(os.path.join(aus, f'{r}-spiel-hafen-*.bin')):
@@ -409,6 +558,12 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
                 dm.polygon(pts, fill=2); stege.append(dict(k=k_, t='P', g=f_['g'][0]))
             elif f_['t'] == 'L' and BREITE[k_] > 0 and len(pts) >= 2:
                 dm.line(pts, fill=2, width=max(1, int(round(BREITE[k_] / hcs)))); stege.append(dict(k=k_, t='L', w=BREITE[k_], g=g))
+        # Museumsschiffe/U-Boote liegen im Wasser: Grundriss als fester Körper (wie Steg), Gelände darunter Wasser
+        for w_ in wahrz:
+            if w_['art'] in ('bark', 'uboot', 'schiff'):
+                gg = w_['g']; pts = [toP(gg[k], gg[k + 1]) for k in range(0, len(gg) - 1, 2)]
+                if len(pts) >= 3 and any(0 <= q[0] < n_ and 0 <= q[1] < n_ for q in pts):
+                    dm.polygon(pts, fill=2)
         msk = np.asarray(mk).astype(np.uint8).copy()
         # Kaimauern: Landkante in Hafennähe (nahe Stegen/Molen oder Hafen-Objekten) → Typ 3, 2 Zellen breit
         nah = np.zeros_like(msk, bool)
@@ -446,7 +601,7 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
                  grid=dict(cs=gcs, nx=nx, ny=ny, tile=T, tiles=kacheln, tile_format='RKT1: <HHI nx,ny,nhaus> z int16 cm, landnutzung uint8, landabstand uint8, haeuser int16[6] (x,y m ab SW der Kachel, l*10, b*10, winkel*1000, h*10); zlib'),
                  overview=dict(file=uebersicht, cs=gcs * 2, nx=nxo, ny=nyo, format='z int16 cm, landnutzung uint8; zlib'),
                  lu_klassen={'1': 'Wald', '2': 'Ort', '3': 'Acker', '4': 'Strand', '5': 'Feuchtgebiet', '6': 'Gebüsch', '7': 'Wiese'},
-                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen)
+                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen, wahrzeichen=wahrz, bruecken=brk)
     json.dump(index, open(os.path.join(aus, f'{r}-spiel.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     gr = sum(os.path.getsize(os.path.join(aus, k[2])) for k in kacheln)
     log(f'  Spieldaten: Index {os.path.getsize(os.path.join(aus, f"{r}-spiel.json")) / 1e6:.1f} MB, Übersicht {os.path.getsize(os.path.join(aus, uebersicht)) / 1e6:.1f} MB, Kacheln zusammen {gr / 1e6:.1f} MB')
