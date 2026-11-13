@@ -205,7 +205,7 @@ WZ_ART = [
 # Bekannte Bauten: Maße nach Recherche (Wikipedia/Structurae), gerundet; Lage dient nur der Zuordnung (Radius 500 m)
 WZ_SPEZ = [
     dict(re=r'Marien', pos=(13.0884, 54.3110), turm=104, helm='barock', schiff=32, westwerk=True),     # St. Marien Stralsund
-    dict(re=r'Nikolai', pos=(13.0915, 54.3156), turm=103, helm='barock', schiff=29, tuerme=2, turm2=66), # St. Nikolai Stralsund
+    dict(re=r'Nikolai', pos=(13.0915, 54.3156), turm=103, helm='barock', schiff=29, tuerme=2, turm2=68, helm2='pyramide'), # St. Nikolai Stralsund
     dict(re=r'Jakobi', pos=(13.0935, 54.3135), turm=68, helm='spitz', schiff=24),                      # St. Jakobi Stralsund
     dict(re=r'Katharinen', pos=(13.0855, 54.3128), turm=0, schiff=22),                                  # Katharinenkloster
     dict(re=r'Dom St\. Nikolai', pos=(13.3770, 54.0960), turm=100, helm='barock', schiff=26),           # Greifswalder Dom
@@ -248,6 +248,37 @@ def wahrzeichen(env, cfg, ll2m, wdist):
             if _re.search(d['re'], n) and math.hypot(c[0] - d['_xy'][0], c[1] - d['_xy'][1]) < 500:
                 w.update({k: v for k, v in d.items() if k not in ('re', 'pos', '_xy')})
                 break
+        out.append(w)
+    # Speicherviertel (z. B. Stralsunder Hafeninsel): große Bauten ohne eigenen Eintrag als Backsteinspeicher mit Steildach
+    for zone in cfg.get('speicher', []):
+        (ax, ay), (bx, by) = ll2m(*zone['bbox'][:2]), ll2m(*zone['bbox'][2:])
+        for ft in env:
+            if ft.get('c') != 'building' or ft.get('t') != 'P':
+                continue
+            g = np.array(ft['g'][0], float).reshape(-1, 2)
+            if len(g) < 3:
+                continue
+            c = g.mean(0)
+            if not (min(ax, bx) < c[0] < max(ax, bx) and min(ay, by) < c[1] < max(ay, by)):
+                continue
+            x_, y_ = g[:, 0], g[:, 1]; fl = 0.5 * abs(np.dot(x_, np.roll(y_, 1)) - np.dot(y_, np.roll(x_, 1)))
+            if fl < zone.get('min_flaeche', 600) or any(abs(o['x'] - c[0]) < 25 and abs(o['y'] - c[1]) < 25 for o in out):
+                continue
+            if _re.search(r'Parkhaus|Ozeaneum|Kirche|Amt', ft.get('n') or ''):
+                continue
+            out.append(dict(n=ft.get('n') or 'Speicher', art='speicher', x=int(round(c[0])), y=int(round(c[1])), h=min(max(float(ft.get('h') or 8), zone.get('h', 22)), 28),
+                            g=[int(round(v)) for v in g.reshape(-1)]))
+    # Aussichtsplattformen (z. B. Skywalk Königsstuhl) aus OSM-Brückenflächen
+    for ft in env:
+        n = ft.get('n') or ''
+        if ft.get('c') == 'bridge' and ft.get('t') == 'P' and _re.search(r'Skywalk|Aussichtsplattform', n):
+            g = np.array(ft['g'][0], float).reshape(-1, 2); c = g.mean(0)
+            out.append(dict(n=n, art='skywalk', x=int(round(c[0])), y=int(round(c[1])), h=2.0, g=[int(round(v)) for v in g.reshape(-1)]))
+    # Bauwerke, die in den Daten fehlen (Lage nach Recherche)
+    for d in cfg.get('wahrzeichen_neu', []):
+        x, y = ll2m(*d['pos'])
+        w = dict(n=d['n'], art=d['art'], x=int(round(x)), y=int(round(y)), h=d.get('h', 8.0), g=[int(x - 5), int(y - 5), int(x + 5), int(y - 5), int(x + 5), int(y + 5), int(x - 5), int(y + 5)])
+        w.update({k: v for k, v in d.items() if k not in ('n', 'art', 'pos', 'h')})
         out.append(w)
     return out
 
@@ -595,6 +626,65 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         open(os.path.join(aus, name), 'wb').write(zlib.compress(b'RKH1' + struct.pack('<iiHH', int(x0), int(y0), hcs, n_) + zcm.tobytes() + msk.tobytes(), 9))
         haefen.append(dict(name=hf['name'], file=name, x0=int(x0), y0=int(y0), cs=hcs, n=int(n_), stege=stege))
         log(f'  Hafen {hf["name"]}: {S_ / 1000:.1f} km, {len(stege)} Molen/Stege, {(msk == 0).mean() * 100:.0f} % Wasser')
+    # --- Kreideküste: steile Kliffs mit Kiesstrand im feinen Raster (Lage aus OSM natural=cliff, Höhe aus dem Gelände)
+    for kn, kd in enumerate(cfg.get('kliffs', [])):
+        kcs = kd.get('zelle', 6)
+        (ax_, ay_), (bx_, by_) = ll2m(*kd['bbox'][:2]), ll2m(*kd['bbox'][2:])
+        x0 = math.floor(min(ax_, bx_) / gcs) * gcs; x1 = math.ceil(max(ax_, bx_) / gcs) * gcs
+        y0 = math.floor(min(ay_, by_) / gcs) * gcs; y1 = math.ceil(max(ay_, by_) / gcs) * gcs
+        for h_ in haefen:                     # nicht in Hafen-Ausschnitte hineinragen
+            hx1, hy1 = h_['x0'] + h_.get('nx', h_['n']) * h_['cs'], h_['y0'] + h_.get('ny', h_['n']) * h_['cs']
+            if h_['x0'] < x1 and hx1 > x0 and h_['y0'] <= y0 < hy1:
+                y0 = math.ceil(hy1 / gcs) * gcs
+        x0, y0 = max(0, x0), max(0, y0); x1, y1 = min(W, x1), min(H, y1)
+        nxk, nyk = int((x1 - x0) // kcs), int((y1 - y0) // kcs)
+        toP = lambda x, y: ((x - x0) / kcs, (y1 - y) / kcs)
+        mk = Image.new('L', (nxk, nyk), 0); dm = ImageDraw.Draw(mk)
+        for ring in meta['land']:
+            xs = [q[0] for q in ring]; ys = [q[1] for q in ring]
+            if max(xs) < x0 or min(xs) > x1 or max(ys) < y0 or min(ys) > y1:
+                continue
+            dm.polygon([toP(q[0], q[1]) for q in ring], fill=1)
+        ck = Image.new('L', (nxk, nyk), 0); dk_ = ImageDraw.Draw(ck); nk = 0
+        for f_ in env:
+            if f_.get('c') == 'cliff' and f_.get('t') == 'L':
+                g = f_['g']; pts = [toP(g[k], g[k + 1]) for k in range(0, len(g) - 1, 2)]
+                if any(0 <= q[0] < nxk and 0 <= q[1] < nyk for q in pts):
+                    dk_.line(pts, fill=1, width=2); nk += 1
+        lnd = np.asarray(mk) > 0; kl = np.asarray(ck) > 0
+        jj, ii = np.mgrid[0:nyk, 0:nxk]
+        Xc = x0 + (ii + 0.5) * kcs; Yc = y1 - (jj + 0.5) * kcs
+        fx = Xc / cs - 0.5; fy = (H - Yc) / cs - 0.5
+        i0 = np.clip(np.floor(fx).astype(int), 0, Zn.shape[1] - 2); j0 = np.clip(np.floor(fy).astype(int), 0, Zn.shape[0] - 2)
+        tx = fx - i0; ty = fy - j0
+        zc = (Zn[j0, i0] * (1 - tx) + Zn[j0, i0 + 1] * tx) * (1 - ty) + (Zn[j0 + 1, i0] * (1 - tx) + Zn[j0 + 1, i0 + 1] * tx) * ty
+        dw = ndimage.distance_transform_edt(lnd) * kcs          # an Land: Abstand zum Wasser
+        dww = ndimage.distance_transform_edt(~lnd) * kcs        # im Wasser: Abstand zum Land
+        dkl = ndimage.distance_transform_edt(~kl) * kcs if kl.any() else np.full(lnd.shape, 1e9)
+        Tp = ndimage.maximum_filter(zc, size=int(2 * kd.get('plateau_r', 180) / kcs) + 1)
+        zone = (dkl < kd.get('reichweite', 220)) & (Tp > 12)
+        zone = ndimage.binary_dilation(zone & (dw < 400), iterations=3) & (dkl < 400)
+        rng = np.random.default_rng(7 + kn)
+        nz = ndimage.gaussian_filter(rng.random(lnd.shape), 6); nz = (nz - nz.mean()) / (nz.std() + 1e-6)
+        bw = np.clip(11 + 5 * nz, 4, 24)                          # Kiesstrand
+        fw = np.clip((Tp - 2) * 0.32, 8, 55) * (1 + 0.15 * nz)     # Breite der Kreidewand
+        tt = np.clip((dw - bw) / fw, 0, 1)
+        face = 1.2 + (Tp - 1.2) * tt ** 0.8 + 1.5 * nz * tt * (1 - tt)
+        wv = np.clip((dw - bw - fw) / 260, 0, 1)
+        inland = np.maximum(zc, Tp * (1 - wv) + zc * wv)
+        zl = np.where(dw < bw, 0.35 + dw * 0.05, np.where(dw < bw + fw, face, inland))
+        zk = np.where(lnd, np.where(zone, zl, np.maximum(zc, 0.4)),
+                      np.where(ndimage.binary_dilation(zone, iterations=6), np.minimum(zc, -0.3 - dww * 0.04), np.minimum(zc, -0.3)))
+        mskk = np.where(lnd, 1, 0).astype(np.uint8)
+        mskk[lnd & zone & (dw < bw)] = 4
+        mskk[lnd & zone & (dw >= bw) & (dw < bw + fw)] = 5
+        rand = np.zeros_like(lnd); rand[:2, :] = rand[-2:, :] = rand[:, :2] = rand[:, -2:] = True
+        zk = np.where(rand, zc, zk)
+        name = f'{r}-spiel-hafen-k{kn}.bin'
+        zcm = np.clip(np.round(zk * 100), -32767, 32767).astype('<i2')
+        open(os.path.join(aus, name), 'wb').write(zlib.compress(b'RKH2' + struct.pack('<iiHHH', int(x0), int(y0), kcs, nxk, nyk) + zcm.tobytes() + mskk.tobytes(), 9))
+        haefen.append(dict(name=kd['name'], file=name, x0=int(x0), y0=int(y0), cs=kcs, n=max(nxk, nyk), nx=nxk, ny=nyk, art='kreide', stege=[]))
+        log(f'  Kliffs {kd["name"]}: {nxk * kcs / 1000:.1f} × {nyk * kcs / 1000:.1f} km, {nk} Kliff-Linien, Kreide {(mskk == 5).mean() * 100:.1f} %, Kies {(mskk == 4).mean() * 100:.1f} %, höchste Wand {float(np.where(mskk == 5, zk, 0).max()):.0f} m')
     index = dict(format='regattakoje-revier-2', revier=r, name=cfg.get('spielname', meta['name']), attribution=meta['attribution'],
                  hinweis='Vereinfachte Regattabahnen entlang tiefem Wasser laut Datensatz. Keine Navigationskarte.',
                  origin_utm=meta['origin_utm'], size=meta['size'],

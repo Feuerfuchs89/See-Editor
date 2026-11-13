@@ -97,6 +97,16 @@ REVIERE['ruegen']['bruecken'] = [
          klappe=dict(name='Peenebrücke Wolgast', osm='Peenebrücke Wolgast', laenge=42, breite=19, art='wippe', dauer=15,
                      zeiten=['05:45', '07:45', '12:45', '17:45', '20:45', dict(z='23:45', von=[6, 1], bis=[9, 30])])),
 ]
+# Hängebrücke Sassnitz (2007): Fußgängerbrücke, 243 m, Hauptfeld 119 m, gekrümmt, ein Mast (Structurae)
+REVIERE['ruegen']['wahrzeichen_neu'] = [
+    dict(n='Hängebrücke Sassnitz', art='haengebruecke', pos=(13.642122, 54.513219), l=243, feld=119, mast=38),
+]
+# Stralsund: Speicher auf der Hafeninsel (Backstein, Steildach, Treppengiebel)
+REVIERE['ruegen']['speicher'] = [dict(name='Hafeninsel Stralsund', bbox=(13.0949, 54.3114, 13.1008, 54.3152), min_flaeche=600, h=24)]
+# Kreideküste Jasmund (Sassnitz – Königsstuhl – Lohme): feines Raster, Kliffs aus OSM natural=cliff
+REVIERE['ruegen']['kliffs'] = [
+    dict(name='Kreideküste Jasmund', bbox=(13.6099, 54.5197, 13.6788, 54.5863), zelle=6),
+]
 REVIERE['ruegen']['haefen'] = [
     dict(name='Stralsund', mitte=(13.09864, 54.31611), groesse=2800),
     dict(name='Sassnitz', mitte=(13.64112, 54.50949), groesse=2400),
