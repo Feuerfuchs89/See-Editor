@@ -140,6 +140,7 @@ REVIERE['usedom']['bahnen'] = {
     'bahn_haff': dict(name='Regattabahn Kleines Haff (vor Mönkebude)', nahe=(14.05, 53.81), r=6000),
     'bahn_achter': dict(name='Regattabahn Achterwasser', nahe=(13.97, 54.00), r=4000),
     'bahn_heringsdorf': dict(name='Regattabahn vor Heringsdorf (Ostsee)', nahe=(14.17, 53.98), r=5000),
+    'bahn_ksc': dict(name='Regattabahn Peenestrom vor dem Kuttersegelclub (Mahlzow)', nahe=(13.7905, 54.0700), r=1500, min_frei=250, cap=700),
     'bahn_gfu': dict(name='Großschiffbahn Pommersche Bucht (Gorch Fock)', nahe=(14.05, 54.12), r=9000, tief=8, cap=6000, min_frei=3000, gross=True),
 }
 REVIERE['usedom']['haefen'] = [
@@ -159,6 +160,14 @@ REVIERE['usedom']['bruecken'] = [
                      zeiten=['05:45', '08:45', '12:45', '16:45', '20:45'])),
 ]
 
+# Wolgast: Peene-Werft und Kuttersegelclub Blau-Weiß Wolgast in Mahlzow (Lage des Vereinshauses aus OSM-Gebäude und Luftbild)
+WOLGAST_WERFT = dict(name='Peene-Werft', re=r'Peene[- ]?Werft', schrift='PEENE-WERFT', schrift2='LÜRSSEN', kraene=5, abstand=60, yacht='Yacht in der Ausrüstung', yacht_l=85)
+KSC_WOLGAST = dict(n='Kuttersegelclub Blau-Weiß Wolgast', art='verein', pos=(13.79932, 54.06302), rect=(-12, -18, 10, 16), h=9)
+KSC_HAFEN = dict(name='Kuttersegelclub Wolgast (Mahlzow)', mitte=(13.7999, 54.0626), groesse=800, tiefe=2.0)
+REVIERE['usedom']['werften'] = [WOLGAST_WERFT]
+REVIERE['usedom']['wahrzeichen_neu'] = [KSC_WOLGAST]
+REVIERE['usedom']['haefen'].append(KSC_HAFEN)
+
 # Kreideküste Jasmund (Sassnitz – Königsstuhl – Lohme): feines Raster, Kliffs aus OSM natural=cliff
 REVIERE['ruegen']['kliffs'] = [
     dict(name='Kreideküste Jasmund', bbox=(13.6099, 54.5197, 13.6788, 54.5863), zelle=6),
@@ -169,7 +178,11 @@ REVIERE['ruegen']['haefen'] = [
     dict(name='Sassnitz', mitte=(13.64112, 54.50949), groesse=2400),
     dict(name='Mukran (Fährhafen Sassnitz)', mitte=(13.58957, 54.48149), groesse=2400),
     dict(name='Peenemünde', mitte=(13.76263, 54.14229), groesse=2800),
+    dict(name='Wolgast', mitte=(13.7750, 54.0530), groesse=2400),
+    KSC_HAFEN,
 ]
+REVIERE['ruegen']['werften'] = [WOLGAST_WERFT]
+REVIERE['ruegen']['wahrzeichen_neu'].append(KSC_WOLGAST)
 
 EMODNET_WCS = 'https://ows.emodnet-bathymetry.eu/wcs'
 COP30 = 'https://copernicus-dem-30m.s3.amazonaws.com/{n}/{n}.tif'

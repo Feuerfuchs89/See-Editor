@@ -196,7 +196,7 @@ WZ_ART = [
     (r'Glasbahnhof|Fährterminal', 'glas'),
     (r'Kraftwerk|Speicher|Magazin|Brecherhaus|Heizhaus', 'backstein'),
     (r'Neuapostol|Königreichssaal|Freikirch|Gemeinschaft|Gemeindehaus|Baptist|Parkhaus|^TrS|Trafo|Station|Hotel|Kiosk|Shop|Schule|Kita|Wohn', None),
-    (r'[Kk]irche|^Dom |\bDom\b|Kapelle|Münster|Kloster', 'kirche'),
+    (r'[Kk]irche|^Dom |\bDom\b|[Kk]apelle|Münster|[Kk]loster|^Sankt |^St\.? [A-ZÄÖÜ]', 'kirche'),
     (r'[a-zäöü]tor$|Tor$', 'tor'),
     (r'Rathaus', 'rathaus'),
     (r'[Ss]chloss|Burg\b', 'schloss'),
@@ -216,9 +216,14 @@ WZ_SPEZ = [
     dict(re=r'Kraftwerk', pos=(13.7650, 54.1440), h=24),
     dict(re=r'Gorch Fock', pos=(13.0985, 54.3165), l=82, masten=[41, 44, 36]),
     dict(re=r'Uferkapelle Vitt', pos=(13.4290, 54.6680), turm=0, achteck=True),
+    # Wolgast: St. Petri (Turm mit flacher Plattform und weißen Blenden), Gertrudenkapelle (Zwölfeck), Rathaus (Barock, weiß), Speicher auf der Schlossinsel
+    dict(re=r'Petri', pos=(13.77637, 54.05340), turm=58, helm='platt', schiff=24),
+    dict(re=r'Gertrudenkapelle', pos=(13.77162, 54.05178), turm=0, zwoelfeck=True),
+    dict(re=r'^Rathaus$', pos=(13.77712, 54.05439), h=12, stil='barock'),
+    dict(re=r'Der Speicher', pos=(13.78062, 54.05473), art='speicher', h=20),
 ]
 
-def wahrzeichen(env, cfg, ll2m, wdist):
+def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
     import re as _re
     spez = [dict(d, _xy=ll2m(*d['pos'])) for d in WZ_SPEZ + list(cfg.get('wahrzeichen_extra', []))]
     out, seen = [], set()
@@ -290,11 +295,95 @@ def wahrzeichen(env, cfg, ll2m, wdist):
         allg = [v for t in d['teile'] for v in t['g']]; xs, ys = allg[0::2], allg[1::2]
         out.append(dict(n=d['n'], art='seebruecke', x=int(sum(xs) / len(xs)), y=int(sum(ys) / len(ys)), h=4.5, teile=d['teile'],
                         g=[min(xs), min(ys), max(xs), min(ys), max(xs), max(ys), min(xs), max(ys)], haus='Sellin' in d['n']))
+    # Werften (z. B. Peene-Werft Wolgast): Hallen im Werftgelände blau mit Schriftzug, Kräne am Kai, eine Yacht in der Ausrüstung
+    def im_poly(x, y, P):
+        c = False
+        for k in range(len(P)):
+            (ax, ay), (bx, by) = P[k - 1], P[k]
+            if (ay > y) != (by > y) and x < (bx - ax) * (y - ay) / ((by - ay) or 1e-9) + ax:
+                c = not c
+        return c
+    for wd in cfg.get('werften', []):
+        zone = None
+        for ft in env:
+            if ft.get('t') == 'P' and _re.search(wd['re'], ft.get('n') or '') and ft.get('c') in ('urban', 'harbor', 'other', 'building'):
+                g = np.array(ft['g'][0], float).reshape(-1, 2)
+                if zone is None or len(g) > len(zone):
+                    zone = g
+        if zone is None:
+            log(f'  WARNUNG Werft {wd["name"]}: Gelände „{wd["re"]}“ nicht in OSM gefunden'); continue
+        Z = [tuple(q) for q in zone]; hallen = []
+        def rand_d(x, y):
+            m = 1e9
+            for k in range(len(Z)):
+                (ax, ay), (bx, by) = Z[k - 1], Z[k]; dx, dy = bx - ax, by - ay; l2 = dx * dx + dy * dy or 1e-9
+                t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / l2)); m = min(m, math.hypot(x - ax - t * dx, y - ay - t * dy))
+            return m
+        for ft in env:
+            if ft.get('c') != 'building' or ft.get('t') != 'P':
+                continue
+            g = np.array(ft['g'][0], float).reshape(-1, 2)
+            if len(g) < 3:
+                continue
+            c = g.mean(0)
+            if not im_poly(c[0], c[1], Z):
+                continue
+            x_, y_ = g[:, 0], g[:, 1]; fl = 0.5 * abs(np.dot(x_, np.roll(y_, 1)) - np.dot(y_, np.roll(x_, 1)))
+            if fl < wd.get('min_flaeche', 700):
+                continue
+            hallen.append((fl, dict(n=ft.get('n') or wd['name'], art='werfthalle', x=int(round(c[0])), y=int(round(c[1])), h=round(min(34.0, 10 + math.sqrt(fl) * 0.15), 1),
+                                    g=[int(round(v)) for v in g.reshape(-1)])))
+        hallen.sort(key=lambda q: -q[0])
+        if hallen:
+            hallen[0][1]['schrift'] = wd.get('schrift', wd['name'].upper()); hallen[0][1]['schrift2'] = wd.get('schrift2', '')
+        out.extend(h for _, h in hallen)
+        # Kai: Landkante im Werftgelände, Kräne alle ≥ 60 m mit Ausleger zum Wasser
+        kai = []
+        if meta and Rn is not None:
+            zx0, zy0 = zone.min(0) - 40; zx1, zy1 = zone.max(0) + 40
+            for ring in meta['land']:
+                for k in range(len(ring)):
+                    (ax, ay), (bx, by) = ring[k - 1][:2], ring[k][:2]
+                    if max(ax, bx) < zx0 or min(ax, bx) > zx1 or max(ay, by) < zy0 or min(ay, by) > zy1:
+                        continue
+                    L_ = math.hypot(bx - ax, by - ay)
+                    for t in np.arange(0, L_, 8.0):
+                        x, y = ax + (bx - ax) * t / L_, ay + (by - ay) * t / L_
+                        if im_poly(x, y, Z) or rand_d(x, y) < 45:
+                            best = None
+                            for a in range(0, 360, 15):
+                                ux, uy = math.sin(math.radians(a)), math.cos(math.radians(a))
+                                dd = Rn.depth(x + ux * 30, y + uy * 30)
+                                if dd >= 2 and Rn.depth(x - ux * 15, y - uy * 15) < 0.5 and (best is None or dd > best[1]):
+                                    best = (a, dd)
+                            if best:
+                                kai.append((x, y, best[0]))
+        kraene = []
+        for x, y, a in kai:
+            if all(math.hypot(x - q[0], y - q[1]) >= wd.get('abstand', 60) for q in kraene):
+                kraene.append((x, y, a))
+            if len(kraene) >= wd.get('kraene', 5):
+                break
+        for i, (x, y, a) in enumerate(kraene):
+            ux, uy = math.sin(math.radians(a)), math.cos(math.radians(a)); cx_, cy_ = x - ux * 7, y - uy * 7
+            out.append(dict(n=f'{wd["name"]} Kran {i + 1}', art='werftkran', x=int(round(cx_)), y=int(round(cy_)), h=30, dir=a,
+                            g=[int(cx_ - 5), int(cy_ - 5), int(cx_ + 5), int(cy_ - 5), int(cx_ + 5), int(cy_ + 5), int(cx_ - 5), int(cy_ + 5)]))
+        yl = wd.get('yacht_l', 80); platz = None
+        for x, y, a in (kai if wd.get('yacht') else []):
+            ux, uy = math.sin(math.radians(a)), math.cos(math.radians(a)); yx, yy = x + ux * 16, y + uy * 16
+            if all(Rn.depth(yx + uy * f * yl / 2 + ux * o, yy - ux * f * yl / 2 + uy * o) >= 1.6 for f in (-1, -0.5, 0, 0.5, 1) for o in (-7, 7)):
+                platz = (x, y, a); break
+        if platz:
+            x, y, a = platz; ux, uy = math.sin(math.radians(a)), math.cos(math.radians(a)); yx, yy = x + ux * 16, y + uy * 16
+            out.append(dict(n=wd['yacht'], art='yacht', x=int(round(yx)), y=int(round(yy)), h=14, dir=(a + 90) % 360, l=wd.get('yacht_l', 80),
+                            g=[int(yx - 6), int(yy - 6), int(yx + 6), int(yy - 6), int(yx + 6), int(yy + 6), int(yx - 6), int(yy + 6)]))
+        log(f'  Werft {wd["name"]}: {len(hallen)} Hallen, {len(kraene)} Kräne')
     # Bauwerke, die in den Daten fehlen (Lage nach Recherche)
     for d in cfg.get('wahrzeichen_neu', []):
         x, y = ll2m(*d['pos'])
-        w = dict(n=d['n'], art=d['art'], x=int(round(x)), y=int(round(y)), h=d.get('h', 8.0), g=[int(x - 5), int(y - 5), int(x + 5), int(y - 5), int(x + 5), int(y + 5), int(x - 5), int(y + 5)])
-        w.update({k: v for k, v in d.items() if k not in ('n', 'art', 'pos', 'h')})
+        e0, n0, e1, n1 = d.get('rect', (-5, -5, 5, 5))
+        w = dict(n=d['n'], art=d['art'], x=int(round(x)), y=int(round(y)), h=d.get('h', 8.0), g=[int(x + e0), int(y + n0), int(x + e1), int(y + n0), int(x + e1), int(y + n1), int(x + e0), int(y + n1)])
+        w.update({k: v for k, v in d.items() if k not in ('n', 'art', 'pos', 'h', 'rect')})
         out.append(w)
     return out
 
@@ -568,7 +657,7 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         if ex.get('f') and not any(math.hypot(ex_x - q['x'], ex_y - q['y']) < 150 and q['f'].get('c') for q in feuer):
             feuer.append(dict(x=round(ex_x), y=round(ex_y), h=ex.get('h', 30), typ='light_major', name=ex['name'], f=ex['f'], quelle='Recherche'))
     log(f'  {len(feuer)} Feuer mit Kennung, {len(tuerme)} Leuchttürme/Feuerträger')
-    wahrz = wahrzeichen(env, cfg, ll2m, wdist)
+    wahrz = wahrzeichen(env, cfg, ll2m, wdist, meta, Rn)
     brk = bruecken(env, meta, cfg, ll2m)
     # --- Fahrende Schiffe (z. B. Gorch Fock): Weg vom Liegeplatz zum Ziel durch tiefes Wasser, an Regattabahnen sowie Start/Ziel vorbei
     schiffe = []
