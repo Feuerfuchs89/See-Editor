@@ -1,0 +1,11 @@
+Revier Rostock · Warnemünde · Unterwarnow – Datenquellen (im Spiel sichtbar nennen)
+
+© OpenStreetMap-Mitwirkende, ODbL 1.0 (openstreetmap.org/copyright)
+Seezeichen: OpenSeaMap (aus OpenStreetMap, ODbL)
+Wassertiefe: EMODnet Bathymetry Consortium, EMODnet Digital Bathymetry (DTM), CC BY 4.0
+Gelände: Copernicus DEM GLO-30 © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt im Rahmen von COPERNICUS durch die Europäische Union und ESA
+
+Hinweise:
+- OpenStreetMap: Die Revierdateien sind eine abgeleitete Datenbank (ODbL 1.0). Bilder/Spielszenen daraus sind „Produced Work“ und brauchen die Nennung.
+- EMODnet und Copernicus DEM: Namensnennung nötig.
+- KEINE Navigationskarte. Keine Rechtsberatung.
