@@ -55,6 +55,17 @@ REVIERE = {
         regatten=['Peenestrom–Haff', 'Ruden → Wolgast'],
         spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
     ),
+    'rostock': dict(
+        name='Rostock · Warnemünde · Unterwarnow',
+        spielname='Rostock · Warnemünde',
+        # Stadthafen Rostock, Unterwarnow, Breitling, Seekanal, Warnemünde, Hohe Düne, Ostsee von Nienhagen bis Markgrafenheide
+        bbox=(11.95, 54.07, 12.25, 54.27),
+        zelle=40, maske=10, ufer_tol=1.5, hang=0.10,
+        umgebung_schlank=True,
+        osm='https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
+        regatten=['Warnow-Regatta (Stadthafen → Warnemünde)', 'Warnemünder Woche'],
+        spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
+    ),
     'ruegen': dict(
         name='Rügen · Hiddensee · Strelasund · Greifswalder Bodden · Peenestrom',
         spielname='Rügen · Bodden · Peenestrom',
@@ -158,6 +169,36 @@ REVIERE['usedom']['bruecken'] = [
     dict(name='Zecheriner Brücke', art='klapp', bbox=(13.815, 53.865, 13.860, 53.885), wahl=dict(s=['primary', 'secondary', 'trunk']), hoehe=6,
          klappe=dict(name='Zecheriner Brücke', osm='Zecheriner Brücke', laenge=40, breite=12, art='wippe', dauer=15,
                      zeiten=['05:45', '08:45', '12:45', '16:45', '20:45'])),
+]
+
+# ------------------------------------------------------------------ Rostock / Warnemünde
+REVIERE['rostock']['kurse'] = {
+    'warnow': dict(name='Warnow-Regatta (Stadthafen → Warnemünde → Ostsee)', kurz='Stadthafen Rostock → Unterwarnow → Breitling → Seekanal → Warnemünde → Ziel auf See',
+                   start=(12.1250, 54.0985), start_r=600, anker=[(12.1060, 54.1340), (12.0930, 54.1720)], ziel=(12.0600, 54.2150), ziel_name='Ziel vor Warnemünde'),
+    'heide': dict(name='Warnemünde → Markgrafenheide (Küstenkurs)', kurz='vor Warnemünde → entlang der Rostocker Heide → Ziel vor Markgrafenheide',
+                  start=(12.0700, 54.2000), start_r=1500, anker=[(12.1300, 54.2150)], ziel=(12.1900, 54.2200), ziel_name='Ziel vor Markgrafenheide'),
+}
+REVIERE['rostock']['bahnen'] = {
+    'bahn_warnemuende': dict(name='Regattabahn vor Warnemünde (Warnemünder Woche)', nahe=(12.0700, 54.2050), r=4000),
+    'bahn_heide': dict(name='Regattabahn vor Markgrafenheide', nahe=(12.1600, 54.2150), r=4000),
+    'bahn_breitling': dict(name='Regattabahn Breitling', nahe=(12.1250, 54.1550), r=1800, min_frei=300, cap=900),
+    'bahn_gfr': dict(name='Großschiffbahn vor Warnemünde (Gorch Fock)', nahe=(12.1000, 54.2400), r=9000, tief=8, cap=6000, min_frei=2000, gross=True),
+}
+REVIERE['rostock']['haefen'] = [
+    dict(name='Warnemünde · Alter Strom · Hohe Düne', mitte=(12.0930, 54.1800), groesse=2400),
+    dict(name='Rostock Stadthafen', mitte=(12.1330, 54.0930), groesse=2400),
+    dict(name='Überseehafen Fährterminal', mitte=(12.1030, 54.1510), groesse=2000),
+]
+REVIERE['rostock']['werften'] = [dict(name='Neptun Werft', re=r'Neptun', schrift='NEPTUN WERFT', schrift2='', kraene=3, abstand=70)]
+# Kreuzfahrtschiff am Warnemünde Cruise Center (Liegeplatz wird am Kai gesucht)
+REVIERE['rostock']['liegeschiffe'] = [dict(n='AIDAdiva', typ='aida', schiff='AIDAdiva', pos=(12.0925, 54.1775), r=600, L=252, B=32, tief=7.0)]
+# Linienverkehr: Fähren nach Gedser und Trelleborg, Warnowfähre, Hafenrundfahrt (Modelle nach Maßen und Reedereifarben)
+REVIERE['rostock']['schiffe'] = [
+    dict(name='Scandlines Berlin (Rostock–Gedser)', schiff='BERLIN', typ='scandlines', start=(12.1040, 54.1525), start_r=500, ziel=(12.1500, 54.2650), ziel_r=1500, ziel_name='Kurs Gedser', tief=7.0, kn=18),
+    dict(name='Scandlines Copenhagen (Rostock–Gedser)', schiff='COPENHAGEN', typ='scandlines_rotor', start=(12.1050, 54.1500), start_r=500, ziel=(12.1700, 54.2650), ziel_r=1500, ziel_name='Kurs Gedser', tief=7.0, kn=18),
+    dict(name='Stena Skåne (Rostock–Trelleborg)', schiff='SKÅNE', typ='stena', start=(12.1070, 54.1480), start_r=600, ziel=(12.2200, 54.2650), ziel_r=1500, ziel_name='Kurs Trelleborg', tief=7.5, kn=16),
+    dict(name='Warnowfähre Warnemünde–Hohe Düne', schiff='WARNOW', typ='warnow', start=(12.0905, 54.1745), start_r=250, ziel=(12.0985, 54.1745), ziel_r=250, ziel_name='Hohe Düne', tief=3.0, kn=5),
+    dict(name='Hafenrundfahrt Warnemünde–Stadthafen', schiff='HANSE', typ='ausflug', start=(12.0870, 54.1790), start_r=400, ziel=(12.1300, 54.0960), ziel_r=500, ziel_name='Stadthafen Rostock', tief=2.5, kn=9),
 ]
 
 # Wolgast: Peene-Werft und Kuttersegelclub Blau-Weiß Wolgast in Mahlzow (Lage des Vereinshauses aus OSM-Gebäude und Luftbild)

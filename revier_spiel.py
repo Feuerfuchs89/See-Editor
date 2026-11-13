@@ -198,6 +198,7 @@ WZ_ART = [
     (r'Neuapostol|Königreichssaal|Freikirch|Gemeinschaft|Gemeindehaus|Baptist|Parkhaus|^TrS|Trafo|Station|Hotel|Kiosk|Shop|Schule|Kita|Wohn', None),
     (r'[Kk]irche|^Dom |\bDom\b|[Kk]apelle|Münster|[Kk]loster|^Sankt |^St\.? [A-ZÄÖÜ]', 'kirche'),
     (r'[a-zäöü]tor$|Tor$', 'tor'),
+    (r'^Teepott', 'teepott'),
     (r'Rathaus', 'rathaus'),
     (r'[Ss]chloss|Burg\b', 'schloss'),
     (r'[Tt]urm$|Turm\b', 'turm'),
@@ -221,6 +222,10 @@ WZ_SPEZ = [
     dict(re=r'Gertrudenkapelle', pos=(13.77162, 54.05178), turm=0, zwoelfeck=True),
     dict(re=r'^Rathaus$', pos=(13.77712, 54.05439), h=12, stil='barock'),
     dict(re=r'Der Speicher', pos=(13.78062, 54.05473), art='speicher', h=20),
+    # Rostock: St. Petri (Turm mit sehr hoher grüner Spitze, 117 m), St. Marien (Barockhaube), St. Nikolai
+    dict(re=r'Petri', pos=(12.1466, 54.0903), turm=117, helm='spitz', schiff=30),
+    dict(re=r'Marien', pos=(12.1395, 54.0889), turm=86, helm='barock', schiff=34),
+    dict(re=r'Nikolai', pos=(12.1445, 54.0889), turm=60, helm='pyramide', schiff=26),
 ]
 
 def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
@@ -378,6 +383,43 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
             out.append(dict(n=wd['yacht'], art='yacht', x=int(round(yx)), y=int(round(yy)), h=14, dir=(a + 90) % 360, l=wd.get('yacht_l', 80),
                             g=[int(yx - 6), int(yy - 6), int(yx + 6), int(yy - 6), int(yx + 6), int(yy + 6), int(yx - 6), int(yy + 6)]))
         log(f'  Werft {wd["name"]}: {len(hallen)} Hallen, {len(kraene)} Kräne')
+    # Liegeschiffe (z. B. Kreuzfahrtschiff am Cruise Center): Landkante nahe pos, Schiff parallel zum Kai in tiefem Wasser
+    for ls in cfg.get('liegeschiffe', []):
+        if not (meta and Rn is not None):
+            break
+        px, py = ll2m(*ls['pos']); R_ = ls.get('r', 500); Ls, Bs = ls['L'], ls['B']; best = None
+        T0 = ls.get('tief', 6.0)
+        for Ts, ab in [(T0, 4), (T0 - 2, 4), (T0 - 2, 15), (3.0, 10), (2.0, 25)]:
+            if best:
+                break
+            for ring in meta['land']:
+                for k in range(len(ring)):
+                    (ax, ay), (bx, by) = ring[k - 1][:2], ring[k][:2]
+                    if min(ax, bx) > px + R_ or max(ax, bx) < px - R_ or min(ay, by) > py + R_ or max(ay, by) < py - R_:
+                        continue
+                    L_ = math.hypot(bx - ax, by - ay)
+                    if L_ < 1:
+                        continue
+                    ex, ey = (bx - ax) / L_, (by - ay) / L_
+                    for t in np.arange(0, L_, 10.0):
+                        x, y = ax + ex * t, ay + ey * t
+                        if math.hypot(x - px, y - py) > R_:
+                            continue
+                        for sg in (1, -1):
+                            nx, ny = -ey * sg, ex * sg
+                            cx_, cy_ = x + nx * (Bs / 2 + ab), y + ny * (Bs / 2 + ab)
+                            if Rn.depth(x - nx * 45, y - ny * 45) >= 0.5:
+                                continue
+                            if all(Rn.depth(cx_ + ex * f * Ls / 2 + nx * o, cy_ + ey * f * Ls / 2 + ny * o) >= (min(Ts, 1.5) if o < 0 else Ts) for f in (-1, -0.5, 0, 0.5, 1) for o in (-Bs / 2, 0, Bs / 2)):
+                                d = math.hypot(x - px, y - py)
+                                if best is None or d < best[0]:
+                                    best = (d, cx_, cy_, math.degrees(math.atan2(ex, ey)) % 360, Ts)
+        if not best:
+            log(f'  WARNUNG Liegeschiff {ls["n"]}: kein Liegeplatz am Kai gefunden'); continue
+        _, cx_, cy_, dg, Ts = best
+        out.append(dict(n=ls['n'], art='kreuzfahrt', typ=ls.get('typ', 'aida'), schiff=ls.get('schiff', ''), x=int(round(cx_)), y=int(round(cy_)), h=40, dir=round(dg, 1),
+                        g=[int(cx_ - 8), int(cy_ - 8), int(cx_ + 8), int(cy_ - 8), int(cx_ + 8), int(cy_ + 8), int(cx_ - 8), int(cy_ + 8)]))
+        log(f'  Liegeschiff {ls["n"]}: am Kai, {best[0]:.0f} m vom Wunschplatz, Wassertiefe laut Daten ≥ {Ts:.1f} m')
     # Bauwerke, die in den Daten fehlen (Lage nach Recherche)
     for d in cfg.get('wahrzeichen_neu', []):
         x, y = ll2m(*d['pos'])
