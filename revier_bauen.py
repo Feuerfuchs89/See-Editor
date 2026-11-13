@@ -23,7 +23,7 @@ Ausgabe (alles im Hauptordner, Präfix = Reviername):
 Koordinaten: EPSG:25833 (UTM 33), Meter, Ursprung = Südwest-Ecke des Reviers, x = Ost, y = Nord.
 KEINE Navigationskarte.
 """
-import argparse, io, json, math, os, sys, time, datetime
+import argparse, io, json, math, os, re, sys, time, datetime
 
 import numpy as np
 import requests
@@ -76,6 +76,8 @@ REVIERE = {
         umgebung_schlank=True,   # Revierkarte ohne Gebäude/Fußwege (Gebäude in <r>-gebaeude.json und in den Spielkacheln)
         osm='https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
         regatten=['Blaues Band vom Strelasund', 'Rund Hiddensee'],
+        binnen=True, binnen_namen=r'Kleiner Jasmunder Bodden', binnen_tief=4.0, binnen_hang=0.05,   # Bodden/Häfen, die in OSM keine Küste sind
+        durchstiche=[dict(name='Lietzow', von=(13.49805, 54.47880), bis=(13.49752, 54.47962), breite=30, tief=2.2)],
         spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
     ),
 }
@@ -224,6 +226,7 @@ REVIERE['ruegen']['haefen'] = [
     dict(name='Peenemünde', mitte=(13.76263, 54.14229), groesse=2800),
     dict(name='Wolgast', mitte=(13.7750, 54.0530), groesse=2400),
     KSC_HAFEN,
+    dict(name='Lietzow (Durchlass zum Kleinen Jasmunder Bodden)', mitte=(13.4978, 54.4792), groesse=600),
 ]
 REVIERE['ruegen']['werften'] = [WOLGAST_WERFT]
 REVIERE['ruegen']['wahrzeichen_neu'].append(KSC_WOLGAST)
@@ -672,9 +675,10 @@ def binnen(feats, geb, cfg, mim):
     Wasserflächen aus OSM, die mit der See verbunden sind, kommen zum Wasser dazu."""
     from scipy import ndimage
     cs = cfg['maske']; W, H = geb.W, geb.H
-    kand = []
+    kand = []; benannt = []; nre = cfg.get('binnen_namen')
     for f in feats:
         g = f.get('geometry') or {}
+        nm = (f.get('properties') or {}).get('name') or ''
         polys = [g['coordinates']] if g.get('type') == 'Polygon' else g.get('coordinates', []) if g.get('type') == 'MultiPolygon' else []
         for pg in polys:
             if not pg or len(pg[0]) < 4:
@@ -682,7 +686,7 @@ def binnen(feats, geb, cfg, mim):
             lo, la = np.array(pg[0])[:, :2].T; x, y = geb.to_m(lo, la); P = list(zip(x.tolist(), y.tolist()))
             if abs(flaeche(P)) < cfg.get('binnen_min', 4000):
                 continue
-            kand.append(P)
+            kand.append(P); benannt.append(bool(nre and re.search(nre, nm)))
     log(f'  Binnengewässer: {len(kand)} Flächen aus OSM')
     if not kand:
         return []
@@ -696,9 +700,12 @@ def binnen(feats, geb, cfg, mim):
         im = Image.new('L', (i1 - i0, j1 - j0), 0); ImageDraw.Draw(im).polygon([(a - i0, b - j0) for a, b in f(P)], fill=1)
         return (j0, j1, i0, i1, np.asarray(im).astype(bool))
     R_ = [raster(P) for P in kand]
-    behalten = [False] * len(kand); neu = True; runde = 0
+    behalten = list(benannt); neu = True; runde = 0; it = max(1, int(math.ceil(cfg.get('binnen_verbindung', 10) / cs)))
+    for k, b in enumerate(benannt):
+        if b and R_[k] is not None:
+            j0, j1, i0, i1, m = R_[k]; M[j0:j1, i0:i1] |= m
     while neu and runde < 12:
-        neu = False; runde += 1; D = ndimage.binary_dilation(M, iterations=1)
+        neu = False; runde += 1; D = ndimage.binary_dilation(M, iterations=it)
         for k, r in enumerate(R_):
             if behalten[k] or r is None:
                 continue
@@ -803,7 +810,7 @@ def fuellen(v, maske_ok):
 
 
 # ------------------------------------------------------------------ Tiefe + Höhe
-def gelaende(netz, geb, cfg, wasser_im, binnen_im=None):
+def gelaende(netz, geb, cfg, wasser_im, binnen_im=None, durch=()):
     from scipy import ndimage
     cs = cfg['zelle']; nx, ny = geb.W // cs, geb.H // cs
     xs = (np.arange(nx) + 0.5) * cs; ys = geb.H - (np.arange(ny) + 0.5) * cs     # Zeile 0 = Norden
@@ -845,6 +852,9 @@ def gelaende(netz, geb, cfg, wasser_im, binnen_im=None):
         bm = (np.asarray(binnen_im.resize((nx, ny), Image.BILINEAR)) >= 128) & wm
         modell = -np.minimum(cfg.get('binnen_tief', 10.0), cfg.get('binnen_rand', 0.6) + dist * cfg.get('binnen_hang', 0.08))
         tiefe = np.where(bm, np.minimum(np.where(tiefe < -0.3, tiefe, 0), modell), tiefe)
+        for R, t_ in durch:
+            dm = (np.asarray(maske([], geb.W, geb.H, cfg['maske'], [R]).resize((nx, ny), Image.BILINEAR)) >= 60) & wm
+            tiefe = np.where(dm, np.minimum(tiefe, -t_), tiefe)
         quellen['binnen'] = 'Flüsse/Häfen aus OSM-Wasserflächen, Tiefe modelliert aus Uferabstand (max. %.0f m) – KEINE Messung' % cfg.get('binnen_tief', 10.0)
 
     # --- Höhe Copernicus GLO-30
@@ -964,6 +974,8 @@ HW_ROAD = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassifie
 
 
 def klasse(t):
+    if (t.get('highway') or t.get('railway')) and (t.get('tunnel') in ('yes', 'building_passage', 'culvert', 'flooded') or str(t.get('layer', '0')).startswith('-')):
+        return 'tunnel'      # Warnowtunnel u. a.: liegt unter Wasser/Erde – nicht als Straße zeichnen
     if 'building' in t: return 'building'
     if t.get('place'): return 'place'
     if t.get('man_made') == 'lighthouse' or t.get('seamark:type') == 'light_major': return 'lighthouse'
@@ -1088,12 +1100,21 @@ def main():
     teile, land, wf = kueste(osm['kueste'], geb, cfg)
     mim = maske(teile, geb.W, geb.H, cfg['maske'])
     bring = binnen(osm.get('binnen', []), geb, cfg, mim) if cfg.get('binnen') else []
+    # Durchlässe (z. B. Lietzow zwischen Großem und Kleinem Jasmunder Bodden): schmale Rinne als Wasser
+    durch = []
+    for d_ in cfg.get('durchstiche', []):
+        ax, ay = geb.to_m(*d_['von']); bx, by = geb.to_m(*d_['bis']); ax, ay, bx, by = float(ax), float(ay), float(bx), float(by)
+        L_ = math.hypot(bx - ax, by - ay) or 1; ux, uy = (bx - ax) / L_, (by - ay) / L_; hw = d_.get('breite', 30) / 2
+        R = [(ax - uy * hw - ux * 15, ay + ux * hw - uy * 15), (bx - uy * hw + ux * 15, by + ux * hw + uy * 15), (bx + uy * hw + ux * 15, by - ux * hw + uy * 15), (ax + uy * hw - ux * 15, ay - ux * hw - uy * 15)]
+        durch.append((R, d_.get('tief', 2.5))); bring.append(R); log(f'  Durchlass {d_["name"]}: {L_:.0f} m, {2 * hw:.0f} m breit')
     if bring:
-        bim = maske([], geb.W, geb.H, cfg['maske'], bring)
+        # nur das wirklich neue Wasser bekommt die Modelltiefe (Bodden, die schon hinter der Küste liegen, behalten ihre Messwerte)
+        neu_w = (np.asarray(maske([], geb.W, geb.H, cfg['maske'], bring)) >= 128) & (np.asarray(mim) < 128)
+        bim = Image.fromarray((neu_w * 255).astype(np.uint8))
         mim = maske(teile, geb.W, geb.H, cfg['maske'], bring)
     else:
         bim = None
-    cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim)
+    cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim, durch)
     pkt, lin = seezeichen(osm['seezeichen'], geb)
     std = dict(gebaeude=8.0, wald=15.0)
     env = [] if a.ohne_umgebung else umgebung(osm['umgebung'], geb, std)
