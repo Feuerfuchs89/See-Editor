@@ -43,6 +43,18 @@ REVIERE = {
         regatten=['Blaues Band vom Strelasund (Stralsund → Neuendorf/Hiddensee)', 'Rund Hiddensee'],
         spiel=dict(zelle=40, kachel=400),
     ),
+    'usedom': dict(
+        name='Usedom · Stettiner Haff · Peenestrom (ab dem Ruden)',
+        spielname='Usedom · Haff · Peenestrom',
+        # vom Ruden über Peenestrom, Achterwasser, Usedom-Außenküste bis Swinemünde, Kleines Haff mit Anklam, Mönkebude, Ueckermünde
+        bbox=(13.60, 53.70, 14.32, 54.23),
+        zelle=40, maske=10, ufer_tol=1.5, hang=0.10,
+        umgebung_schlank=True,
+        osm=['https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
+             'https://download.geofabrik.de/europe/poland/zachodniopomorskie-latest.osm.pbf'],
+        regatten=['Peenestrom–Haff', 'Ruden → Wolgast'],
+        spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
+    ),
     'ruegen': dict(
         name='Rügen · Hiddensee · Strelasund · Greifswalder Bodden · Peenestrom',
         spielname='Rügen · Bodden · Peenestrom',
@@ -116,6 +128,37 @@ REVIERE['ruegen']['schiffe'] = [dict(name='Gorch Fock', wz=r'Gorch Fock', ziel=(
     dict(name='Bäderschiff Binz–Sellin', schiff='ADLER-MÖNCHGUT', typ='baeder', start=(13.6150, 54.4030), start_r=500, ziel=(13.6990, 54.3790), ziel_r=500, ziel_name='Seebrücke Sellin', tief=2.5, kn=9),
     dict(name='Fischkutter SAS 12', typ='kutter', start=(13.6420, 54.5110), start_r=600, ziel=(13.8000, 54.5600), ziel_r=1500, ziel_name='Fanggebiet', tief=4.0, kn=8),
 ]
+# ------------------------------------------------------------------ Usedom
+REVIERE['usedom']['kurse'] = {
+    'haff': dict(name='Peenestrom–Haff (Wolgast → Ueckermünde)', kurz='Wolgast → Peenestrom → Zecheriner Brücke → Kleines Haff → Ueckermünde',
+                 start=(13.7800, 54.0420), start_r=1200, anker=[(13.8560, 53.9550), (13.8380, 53.8750), (13.9500, 53.8050)],
+                 ziel=(14.0600, 53.7500), ziel_name='Ziel Ueckermünde'),
+    'ruden': dict(name='Ruden → Wolgast (Peenemündung)', kurz='Ruden → Peenemünde → Kröslin → Wolgast',
+                  start=(13.7700, 54.1950), start_r=1500, anker=[(13.8000, 54.1350)], ziel=(13.7780, 54.0700), ziel_name='Ziel vor der Peenebrücke'),
+}
+REVIERE['usedom']['bahnen'] = {
+    'bahn_haff': dict(name='Regattabahn Kleines Haff (vor Mönkebude)', nahe=(14.05, 53.81), r=6000),
+    'bahn_achter': dict(name='Regattabahn Achterwasser', nahe=(13.97, 54.00), r=4000),
+    'bahn_heringsdorf': dict(name='Regattabahn vor Heringsdorf (Ostsee)', nahe=(14.17, 53.98), r=5000),
+    'bahn_gfu': dict(name='Großschiffbahn Pommersche Bucht (Gorch Fock)', nahe=(14.05, 54.12), r=9000, tief=8, cap=6000, min_frei=3000, gross=True),
+}
+REVIERE['usedom']['haefen'] = [
+    dict(name='Wolgast', mitte=(13.7750, 54.0530), groesse=2400),
+    dict(name='Peenemünde', mitte=(13.76263, 54.14229), groesse=2400),
+    dict(name='Ueckermünde', mitte=(14.0650, 53.7410), groesse=2400),
+    dict(name='Mönkebude', mitte=(13.9700, 53.7750), groesse=1600),
+]
+REVIERE['usedom']['bruecken'] = [
+    dict(name='Peenebrücke Wolgast', art='klapp', bbox=(13.7775, 54.0512, 13.7942, 54.0586),
+         wahl=dict(n=['Peenebrücke', 'Peenemünder Straße', 'Straße der Freundschaft'], s=['primary']), hoehe=6,
+         klappe=dict(name='Peenebrücke Wolgast', osm='Peenebrücke Wolgast', laenge=42, breite=19, art='wippe', dauer=15,
+                     zeiten=['05:45', '07:45', '12:45', '17:45', '20:45', dict(z='23:45', von=[6, 1], bis=[9, 30])])),
+    # Zecheriner Brücke (B 110) über den Peenestrom; Öffnungen laut YACHT 5.45, 8.45, 12.45, 16.45, 20.45 Uhr
+    dict(name='Zecheriner Brücke', art='klapp', bbox=(13.815, 53.865, 13.860, 53.885), wahl=dict(s=['primary', 'secondary', 'trunk']), hoehe=6,
+         klappe=dict(name='Zecheriner Brücke', osm='Zecheriner Brücke', laenge=40, breite=12, art='wippe', dauer=15,
+                     zeiten=['05:45', '08:45', '12:45', '16:45', '20:45'])),
+]
+
 # Kreideküste Jasmund (Sassnitz – Königsstuhl – Lohme): feines Raster, Kliffs aus OSM natural=cliff
 REVIERE['ruegen']['kliffs'] = [
     dict(name='Kreideküste Jasmund', bbox=(13.6099, 54.5197, 13.6788, 54.5863), zelle=6),
@@ -281,11 +324,18 @@ def osm_daten(netz, geb, cfg, mit_umgebung=True):
         if not shutil.which('osmium'):
             raise RuntimeError('osmium-tool fehlt (in der Action: sudo apt-get install -y osmium-tool)')
         log('OSM-Landesauszug (Geofabrik) laden …')
-        pbf = netz.datei('land.osm.pbf', cfg['osm'], pflicht=True, nur_pfad=True)
+        urls = cfg['osm'] if isinstance(cfg['osm'], list) else [cfg['osm']]
         w, s, e, n = geb.llbox(3000)
         rev = netz._pfad('revier.osm.pbf')
         lauf = lambda *a: (log('  osmium ' + ' '.join(a[:2])), subprocess.run(['osmium', *a], check=True))
-        lauf('extract', '-b', f'{w:.5f},{s:.5f},{e:.5f},{n:.5f}', '-s', 'smart', pbf, '-o', rev, '--overwrite')
+        teil_pbf = []
+        for i, url in enumerate(urls):
+            pbf = netz.datei('land.osm.pbf' if i == 0 else f'land{i}.osm.pbf', url, pflicht=True, nur_pfad=True)
+            ziel_i = rev if len(urls) == 1 else netz._pfad(f'revier{i}.osm.pbf')
+            lauf('extract', '-b', f'{w:.5f},{s:.5f},{e:.5f},{n:.5f}', '-s', 'smart', pbf, '-o', ziel_i, '--overwrite')
+            teil_pbf.append(ziel_i)
+        if len(teil_pbf) > 1:
+            lauf('merge', *teil_pbf, '-o', rev, '--overwrite')
         konf = netz._pfad('nur_linien.json')
         json.dump({'linear_tags': True, 'area_tags': False}, open(konf, 'w'))
         for t in teile:

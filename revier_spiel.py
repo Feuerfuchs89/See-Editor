@@ -508,7 +508,9 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
             if not all(0 <= q[0] <= W and 0 <= q[1] <= H for q in [ll2m(*k['start']), ll2m(*k['ziel'])] + [ll2m(*p) for p in k.get('anker', [])]):
                 raise RuntimeError('liegt teilweise außerhalb des Reviers')
             st, _ = bester_platz(CLR, Rn, *ll2m(*k['start']), k.get('start_r', 2000))
-            anker = [st] + [ll2m(*p) for p in k.get('anker', [])] + [ll2m(*k['ziel'])]
+            def nass(pt, r=1500):
+                return pt if Rn.depth(*pt) >= 1.5 else bester_platz(CLR, Rn, pt[0], pt[1], r)[0]
+            anker = [st] + [nass(ll2m(*p)) for p in k.get('anker', [])] + [nass(ll2m(*k['ziel']), 800)]
             rt = route(Rn, anker)
             G, fin = tore(rt, k.get('ziel_name', 'Ziel'))
             kurse[key] = dict(name=k['name'], kurz=k.get('kurz', ''), sm=round(Lsum(rt) / 1852, 1), start=[round(st[0]), round(st[1])],
