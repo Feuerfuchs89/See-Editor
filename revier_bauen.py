@@ -64,7 +64,8 @@ REVIERE = {
         umgebung_schlank=True,
         osm='https://download.geofabrik.de/europe/germany/mecklenburg-vorpommern-latest.osm.pbf',
         regatten=['Warnow-Regatta (Stadthafen → Warnemünde)', 'Warnemünder Woche'],
-        spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
+        binnen=True, binnen_tief=11.0, binnen_hang=0.15, binnen_rand=2.0,   # Unterwarnow, Breitling, Seekanal, Hafenbecken sind in OSM keine Küste
+        spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=18000, haus_abstand=2500),   # ganze Stadtkulisse Rostock
     ),
     'ruegen': dict(
         name='Rügen · Hiddensee · Strelasund · Greifswalder Bodden · Peenestrom',
@@ -184,10 +185,12 @@ REVIERE['rostock']['bahnen'] = {
     'bahn_breitling': dict(name='Regattabahn Breitling', nahe=(12.1250, 54.1550), r=1800, min_frei=300, cap=900),
     'bahn_gfr': dict(name='Großschiffbahn vor Warnemünde (Gorch Fock)', nahe=(12.1000, 54.2400), r=9000, tief=8, cap=6000, min_frei=2000, gross=True),
 }
-REVIERE['rostock']['haefen'] = [
-    dict(name='Warnemünde · Alter Strom · Hohe Düne', mitte=(12.0930, 54.1800), groesse=2400),
+REVIERE['rostock']['haefen'] = [   # 4-m-Raster entlang der ganzen Warnow: Stadthafen → Unterwarnow → Breitling/Überseehafen → Seekanal → Warnemünde
+    dict(name='Warnemünde · Alter Strom · Hohe Düne', mitte=(12.0930, 54.1790), groesse=2400),
+    dict(name='Seekanal · Überseehafen', mitte=(12.1080, 54.1560), groesse=2400),
+    dict(name='Unterwarnow · Schmarl · Marienehe', mitte=(12.0960, 54.1330), groesse=2400),
+    dict(name='Unterwarnow · Gehlsdorf', mitte=(12.1120, 54.1110), groesse=2400),
     dict(name='Rostock Stadthafen', mitte=(12.1330, 54.0930), groesse=2400),
-    dict(name='Überseehafen Fährterminal', mitte=(12.1030, 54.1510), groesse=2000),
 ]
 REVIERE['rostock']['werften'] = [dict(name='Neptun Werft', re=r'Neptun', schrift='NEPTUN WERFT', schrift2='', kraene=3, abstand=70)]
 # Kreuzfahrtschiff am Warnemünde Cruise Center (Liegeplatz wird am Kai gesucht)
@@ -363,13 +366,14 @@ UMG_FILTER = [
     'w/railway=rail', 'nwr/leisure=marina,slipway', 'nwr/man_made=pier,breakwater,groyne,quay,lighthouse,tower,bridge',
     'nwr/harbour', 'w/waterway=river,canal,stream,ditch,dock',
     'n/place=city,town,village,hamlet,isolated_dwelling,island,islet,locality,peninsula', 'n/natural=peak,cape']
-TEILE = {'kueste': ['w/natural=coastline'], 'seezeichen': ['nwr/seamark:type'], 'umgebung': UMG_FILTER}
+TEILE = {'kueste': ['w/natural=coastline'], 'seezeichen': ['nwr/seamark:type'], 'umgebung': UMG_FILTER,
+         'binnen': ['wr/natural=water', 'wr/waterway=riverbank', 'wr/landuse=basin', 'wr/harbour=yes']}
 
 
 def osm_daten(netz, geb, cfg, mit_umgebung=True):
     """Liefert {'kueste': [...], 'seezeichen': [...], 'umgebung': [...]} als GeoJSON-Features."""
     import shutil, subprocess
-    teile = [t for t in TEILE if mit_umgebung or t != 'umgebung']
+    teile = [t for t in TEILE if (mit_umgebung or t != 'umgebung') and (t != 'binnen' or cfg.get('binnen'))]
     ziel = {t: netz._pfad(f'osm_{t}.geojsonseq') for t in teile}
     if not all(os.path.exists(v) for v in ziel.values()):
         if netz.offline:
@@ -663,7 +667,50 @@ def kueste(feats, geb, cfg):
     return teile, land, wf
 
 
-def maske(teile, W, H, cs):
+def binnen(feats, geb, cfg, mim):
+    """Flüsse, Häfen und Bodden, die in OSM nicht hinter der Küstenlinie liegen (z. B. Unterwarnow, Breitling):
+    Wasserflächen aus OSM, die mit der See verbunden sind, kommen zum Wasser dazu."""
+    from scipy import ndimage
+    cs = cfg['maske']; W, H = geb.W, geb.H
+    kand = []
+    for f in feats:
+        g = f.get('geometry') or {}
+        polys = [g['coordinates']] if g.get('type') == 'Polygon' else g.get('coordinates', []) if g.get('type') == 'MultiPolygon' else []
+        for pg in polys:
+            if not pg or len(pg[0]) < 4:
+                continue
+            lo, la = np.array(pg[0])[:, :2].T; x, y = geb.to_m(lo, la); P = list(zip(x.tolist(), y.tolist()))
+            if abs(flaeche(P)) < cfg.get('binnen_min', 4000):
+                continue
+            kand.append(P)
+    log(f'  Binnengewässer: {len(kand)} Flächen aus OSM')
+    if not kand:
+        return []
+    M = np.asarray(mim) >= 128; h_, w_ = M.shape
+    f = lambda P: [(p[0] / cs, (H - p[1]) / cs) for p in P]
+    def raster(P):
+        xs = [q[0] for q in P]; ys = [q[1] for q in P]
+        i0 = max(0, int(min(xs) / cs) - 2); i1 = min(w_, int(max(xs) / cs) + 3); j0 = max(0, int((H - max(ys)) / cs) - 2); j1 = min(h_, int((H - min(ys)) / cs) + 3)
+        if i1 <= i0 or j1 <= j0:
+            return None
+        im = Image.new('L', (i1 - i0, j1 - j0), 0); ImageDraw.Draw(im).polygon([(a - i0, b - j0) for a, b in f(P)], fill=1)
+        return (j0, j1, i0, i1, np.asarray(im).astype(bool))
+    R_ = [raster(P) for P in kand]
+    behalten = [False] * len(kand); neu = True; runde = 0
+    while neu and runde < 12:
+        neu = False; runde += 1; D = ndimage.binary_dilation(M, iterations=1)
+        for k, r in enumerate(R_):
+            if behalten[k] or r is None:
+                continue
+            j0, j1, i0, i1, m = r
+            if (D[j0:j1, i0:i1] & m).any():
+                behalten[k] = True; neu = True; M[j0:j1, i0:i1] |= m
+    ringe = [dp_ring(P, cfg['ufer_tol']) for P, b in zip(kand, behalten) if b]
+    log(f'  Binnengewässer mit Verbindung zur See: {len(ringe)} Flächen, {sum(abs(flaeche(P)) for P in ringe) / 1e6:.2f} km²')
+    return ringe
+
+
+def maske(teile, W, H, cs, binnen_ringe=()):
     w, h = int(math.ceil(W / cs)), int(math.ceil(H / cs))
     im = Image.new('L', (w, h), 0); dr = ImageDraw.Draw(im)
     f = lambda P: [(p[0] / cs, (H - p[1]) / cs) for p in P]
@@ -672,6 +719,8 @@ def maske(teile, W, H, cs):
     for t in teile:
         for i in t['islands']:
             dr.polygon(f(i), fill=0)
+    for P in binnen_ringe:
+        dr.polygon(f(P), fill=255)
     return im
 
 
@@ -754,7 +803,7 @@ def fuellen(v, maske_ok):
 
 
 # ------------------------------------------------------------------ Tiefe + Höhe
-def gelaende(netz, geb, cfg, wasser_im):
+def gelaende(netz, geb, cfg, wasser_im, binnen_im=None):
     from scipy import ndimage
     cs = cfg['zelle']; nx, ny = geb.W // cs, geb.H // cs
     xs = (np.arange(nx) + 0.5) * cs; ys = geb.H - (np.arange(ny) + 0.5) * cs     # Zeile 0 = Norden
@@ -791,6 +840,12 @@ def gelaende(netz, geb, cfg, wasser_im):
     tiefe = np.minimum(tiefe, -0.3)
     if cfg.get('hang', 0) > 0:
         tiefe = np.maximum(tiefe, -(0.3 + dist * cfg['hang']))
+    if binnen_im is not None:
+        # Flüsse/Häfen: Quellraster dort oft leer oder zu flach – Modell aus Uferabstand (Fahrrinne in der Mitte), das Tiefere zählt
+        bm = (np.asarray(binnen_im.resize((nx, ny), Image.BILINEAR)) >= 128) & wm
+        modell = -np.minimum(cfg.get('binnen_tief', 10.0), cfg.get('binnen_rand', 0.6) + dist * cfg.get('binnen_hang', 0.08))
+        tiefe = np.where(bm, np.minimum(np.where(tiefe < -0.3, tiefe, 0), modell), tiefe)
+        quellen['binnen'] = 'Flüsse/Häfen aus OSM-Wasserflächen, Tiefe modelliert aus Uferabstand (max. %.0f m) – KEINE Messung' % cfg.get('binnen_tief', 10.0)
 
     # --- Höhe Copernicus GLO-30
     log('Copernicus-Höhen laden …')
@@ -1032,7 +1087,13 @@ def main():
     osm = osm_daten(netz, geb, cfg, not a.ohne_umgebung)
     teile, land, wf = kueste(osm['kueste'], geb, cfg)
     mim = maske(teile, geb.W, geb.H, cfg['maske'])
-    cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim)
+    bring = binnen(osm.get('binnen', []), geb, cfg, mim) if cfg.get('binnen') else []
+    if bring:
+        bim = maske([], geb.W, geb.H, cfg['maske'], bring)
+        mim = maske(teile, geb.W, geb.H, cfg['maske'], bring)
+    else:
+        bim = None
+    cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim)
     pkt, lin = seezeichen(osm['seezeichen'], geb)
     std = dict(gebaeude=8.0, wald=15.0)
     env = [] if a.ohne_umgebung else umgebung(osm['umgebung'], geb, std)
@@ -1057,9 +1118,10 @@ def main():
                   hoehe_max_m=round(float(cm[~wm].max()) / 100, 1) if (~wm).any() else None),
         mask=dict(file=f'{r}-maske.png', cellsize=cfg['maske'], ncols=mim.size[0], nrows=mim.size[1], north='oben', white='Wasser', black='Land'),
         environment=dict(file=f'{r}-umgebung.json', count=len(env)),
-        water=[dict(outer=rnd(t['outer']), islands=[rnd(i) for i in t['islands']]) for t in teile],
+        water=[dict(outer=rnd(t['outer']), islands=[rnd(i) for i in t['islands']]) for t in teile] + [dict(outer=rnd(P), islands=[]) for P in bring],
         water_area_km2=round(wf / 1e6, 2), simplify_m=cfg['ufer_tol'],
         land=[rnd(L) for L in land],
+        binnen=[rnd(P) for P in bring],
         seamarks=pkt, seamark_lines=lin,
         warnungen=WARN,
     )

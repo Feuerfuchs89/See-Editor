@@ -346,7 +346,7 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
         kai = []
         if meta and Rn is not None:
             zx0, zy0 = zone.min(0) - 40; zx1, zy1 = zone.max(0) + 40
-            for ring in meta['land']:
+            for ring in meta['land'] + meta.get('binnen', []):
                 for k in range(len(ring)):
                     (ax, ay), (bx, by) = ring[k - 1][:2], ring[k][:2]
                     if max(ax, bx) < zx0 or min(ax, bx) > zx1 or max(ay, by) < zy0 or min(ay, by) > zy1:
@@ -392,7 +392,7 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
         for Ts, ab in [(T0, 4), (T0 - 2, 4), (T0 - 2, 15), (3.0, 10), (2.0, 25)]:
             if best:
                 break
-            for ring in meta['land']:
+            for ring in meta['land'] + meta.get('binnen', []):
                 for k in range(len(ring)):
                     (ax, ay), (bx, by) = ring[k - 1][:2], ring[k][:2]
                     if min(ax, bx) > px + R_ or max(ax, bx) < px - R_ or min(ay, by) > py + R_ or max(ay, by) < py - R_:
@@ -486,6 +486,8 @@ def bruecken(env, meta, cfg, ll2m):
             if max(xs) < x0 or min(xs) > x1 or max(ys) < y0 or min(ys) > y1:
                 continue
             dr.polygon([((q[0] - x0) / cs2, (y1 - q[1]) / cs2) for q in ring], fill=1)
+        for ring in meta.get('binnen', []):
+            dr.polygon([((q[0] - x0) / cs2, (y1 - q[1]) / cs2) for q in ring], fill=0)
         lm = np.asarray(im)
         nass = [0 if lm[min(ny_ - 1, max(0, int((y1 - q[1]) / cs2))), min(nx_ - 1, max(0, int((q[0] - x0) / cs2)))] else 1 for q in pts]
         b = dict(n=bd['name'], art=bd['art'], pts=[int(round(v)) for q in pts for v in q], nass=nass,
@@ -598,6 +600,11 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         q = dp_ring(np.array(ring, float), tol)
         if abs(flaeche(q)) > amin:
             land.append([int(round(v)) for p in q for v in p])
+    binnen_k = []
+    for ring in meta.get('binnen', []):
+        q = dp_ring(np.array(ring, float), min(tol, 6))
+        if abs(flaeche(q)) > 2000:
+            binnen_k.append([int(round(v)) for p in q for v in p])
     cmap = {'red': 'r', 'green': 'g', 'yellow': 'y', 'black': 'k', 'white': 'w', 'orange': 'o'}
     sm = []
     for s in meta['seamarks']:
@@ -765,6 +772,8 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
             if max(xs) < x0 or min(xs) > x0 + S_ or max(ys) < y0 or min(ys) > y1:
                 continue
             dm.polygon([toP(q[0], q[1]) for q in ring], fill=1)
+        for ring in meta.get('binnen', []):
+            dm.polygon([toP(q[0], q[1]) for q in ring], fill=0)
         stege = []
         BREITE = {'pier': 3.5, 'breakwater': 7.0, 'groyne': 3.0, 'quay': 0}
         for f_ in env:
@@ -840,6 +849,8 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
             if max(xs) < x0 or min(xs) > x1 or max(ys) < y0 or min(ys) > y1:
                 continue
             dm.polygon([toP(q[0], q[1]) for q in ring], fill=1)
+        for ring in meta.get('binnen', []):
+            dm.polygon([toP(q[0], q[1]) for q in ring], fill=0)
         ck = Image.new('L', (nxk, nyk), 0); dk_ = ImageDraw.Draw(ck); nk = 0
         for f_ in env:
             if f_.get('c') == 'cliff' and f_.get('t') == 'L':
@@ -907,7 +918,7 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
                  grid=dict(cs=gcs, nx=nx, ny=ny, tile=T, tiles=kacheln, tile_format='RKT1: <HHI nx,ny,nhaus> z int16 cm, landnutzung uint8, landabstand uint8, haeuser int16[6] (x,y m ab SW der Kachel, l*10, b*10, winkel*1000, h*10); zlib'),
                  overview=dict(file=uebersicht, cs=gcs * 2, nx=nxo, ny=nyo, format='z int16 cm, landnutzung uint8; zlib'),
                  lu_klassen={'1': 'Wald', '2': 'Ort', '3': 'Acker', '4': 'Strand', '5': 'Feuchtgebiet', '6': 'Gebüsch', '7': 'Wiese'},
-                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen, wahrzeichen=wahrz, bruecken=brk, strassen=sname, schiffe=schiffe)
+                 land=land, binnen=binnen_k, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen, wahrzeichen=wahrz, bruecken=brk, strassen=sname, schiffe=schiffe)
     json.dump(index, open(os.path.join(aus, f'{r}-spiel.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     gr = sum(os.path.getsize(os.path.join(aus, k[2])) for k in kacheln)
     log(f'  Spieldaten: Index {os.path.getsize(os.path.join(aus, f"{r}-spiel.json")) / 1e6:.1f} MB, Übersicht {os.path.getsize(os.path.join(aus, uebersicht)) / 1e6:.1f} MB, Kacheln zusammen {gr / 1e6:.1f} MB')
