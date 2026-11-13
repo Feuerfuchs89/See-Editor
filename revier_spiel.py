@@ -215,6 +215,7 @@ WZ_SPEZ = [
     dict(re=r'Ozeaneum', pos=(13.0975, 54.3155), h=20),
     dict(re=r'Kraftwerk', pos=(13.7650, 54.1440), h=24),
     dict(re=r'Gorch Fock', pos=(13.0985, 54.3165), l=82, masten=[41, 44, 36]),
+    dict(re=r'Uferkapelle Vitt', pos=(13.4290, 54.6680), turm=0, achteck=True),
 ]
 
 def wahrzeichen(env, cfg, ll2m, wdist):
@@ -274,6 +275,21 @@ def wahrzeichen(env, cfg, ll2m, wdist):
         if ft.get('c') == 'bridge' and ft.get('t') == 'P' and _re.search(r'Skywalk|Aussichtsplattform', n):
             g = np.array(ft['g'][0], float).reshape(-1, 2); c = g.mean(0)
             out.append(dict(n=n, art='skywalk', x=int(round(c[0])), y=int(round(c[1])), h=2.0, g=[int(round(v)) for v in g.reshape(-1)]))
+    # Seebrücken (Binz, Sellin, Göhren, Zinnowitz …): alle Teile gleichen Namens zusammen
+    sb = {}
+    for ft in env:
+        n = ft.get('n') or ''
+        if ft.get('c') == 'pier' and 'Seebrücke' in n and ft.get('t') in ('L', 'P'):
+            g = ft['g'][0] if ft['t'] == 'P' else ft['g']
+            if len(g) < 4:
+                continue
+            c = (sum(g[0::2]) / (len(g) // 2), sum(g[1::2]) / (len(g) // 2))
+            key = n if n != 'Seebrücke' else f'Seebrücke@{int(c[0] // 400)},{int(c[1] // 400)}'
+            sb.setdefault(key, dict(n=n, teile=[]))['teile'].append(dict(t=ft['t'], g=[int(round(v)) for v in g]))
+    for key, d in sb.items():
+        allg = [v for t in d['teile'] for v in t['g']]; xs, ys = allg[0::2], allg[1::2]
+        out.append(dict(n=d['n'], art='seebruecke', x=int(sum(xs) / len(xs)), y=int(sum(ys) / len(ys)), h=4.5, teile=d['teile'],
+                        g=[min(xs), min(ys), max(xs), min(ys), max(xs), max(ys), min(xs), max(ys)], haus='Sellin' in d['n']))
     # Bauwerke, die in den Daten fehlen (Lage nach Recherche)
     for d in cfg.get('wahrzeichen_neu', []):
         x, y = ll2m(*d['pos'])
@@ -504,10 +520,11 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         bx, by = ll2m(*b['nahe'])
         if not (0 <= bx <= W and 0 <= by <= H):
             log(f'  WARNUNG Bahn {key}: liegt außerhalb des Reviers'); continue
-        p, frei = bester_platz(CL3, Rn, bx, by, b.get('r', 4000), cap=2500)
-        if frei < 800:
+        CLb = CL3 if not b.get('tief') else ndimage.distance_transform_edt(np.pad((-Zn) >= b['tief'], 1))[1:-1, 1:-1] * cs
+        p, frei = bester_platz(CLb, Rn, bx, by, b.get('r', 4000), cap=b.get('cap', 2500))
+        if frei < b.get('min_frei', 800):
             log(f'  WARNUNG Bahn {key}: zu wenig freies Wasser ({frei:.0f} m) – weggelassen'); continue
-        kurse[key] = dict(name=b['name'], center=[round(p[0]), round(p[1])], frei_m=int(frei), bahn=True)
+        kurse[key] = dict(name=b['name'], center=[round(p[0]), round(p[1])], frei_m=int(frei), bahn=True, **({'gross': True, 'tief': b['tief']} if b.get('gross') else {}))
         log(f'  Bahn {b["name"]}: Freiraum {frei:.0f} m')
     # --- Feuer (echte Kennung) und Leuchttürme
     STD_H = {'buoy': 2.5, 'beacon': 5.0, 'light_minor': 8.0, 'light_major': 15.0, 'landmark': 15.0, 'light_float': 6.0, 'light_vessel': 10.0, 'platform': 10.0}
@@ -551,6 +568,51 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
     log(f'  {len(feuer)} Feuer mit Kennung, {len(tuerme)} Leuchttürme/Feuerträger')
     wahrz = wahrzeichen(env, cfg, ll2m, wdist)
     brk = bruecken(env, meta, cfg, ll2m)
+    # --- Fahrende Schiffe (z. B. Gorch Fock): Weg vom Liegeplatz zum Ziel durch tiefes Wasser, an Regattabahnen sowie Start/Ziel vorbei
+    schiffe = []
+    for sd in cfg.get('schiffe', []):
+        try:
+            import re as _re
+            if sd.get('wz'):
+                wz = next((w for w in wahrz if _re.search(sd['wz'], w['n'])), None)
+                if not wz:
+                    raise RuntimeError('Liegeplatz-Schiff nicht in den Daten')
+            else:
+                sx_, sy_ = ll2m(*sd['start']); wz = dict(n='', x=sx_, y=sy_)
+            zonen = []
+            for kk, kv in kurse.items():
+                if kv.get('bahn'):
+                    zonen.append((kv['center'][0], kv['center'][1], min(kv.get('frei_m', 1500), 1800), 'bahn'))
+                else:
+                    zonen.append((kv['start'][0], kv['start'][1], 600, 'start')); zonen.append((kv['finish']['x'], kv['finish']['y'], 600, 'ziel'))
+            rt = None
+            for tief in sorted({sd.get('tief', 4.0), max(2.0, sd.get('tief', 4.0) - 1), 2.5, 2.0}, reverse=True):
+                CLD = ndimage.distance_transform_edt(np.pad((-Zn) >= tief, 1))[1:-1, 1:-1] * cs
+                a, fa = bester_platz(CLD, Rn, wz['x'], wz['y'], sd.get('start_r', 900), cap=120)
+                b, fb = bester_platz(CLD, Rn, *ll2m(*sd['ziel']), sd.get('ziel_r', 1500), cap=300)
+                for skal in (1.0, 0.5, 0.0):
+                    Z2 = Zn.copy(); jj_, ii_ = np.mgrid[0:Zn.shape[0], 0:Zn.shape[1]]
+                    for zx, zy, zr, zt in zonen:
+                        rr = zr * (1.0 if zt == 'bahn' else skal)
+                        if rr <= 0:
+                            continue
+                        X_, Y_ = (ii_ + .5) * cs, H - (jj_ + .5) * cs
+                        if math.hypot(zx - a[0], zy - a[1]) < rr or math.hypot(zx - b[0], zy - b[1]) < rr:
+                            continue
+                        Z2[np.hypot(X_ - zx, Y_ - zy) < rr] = 1.0
+                    try:
+                        rt = route(Raster(Z2, cs, H), [a, b], thr0=tief); break
+                    except Exception:
+                        rt = None
+                if rt:
+                    break
+            if not rt:
+                raise RuntimeError('kein Weg gefunden')
+            schiffe.append(dict(name=sd['name'], wz=wz['n'], tief=tief, zonen_skal=skal, route=[[round(p_[0]), round(p_[1])] for p_ in rt],
+                                **{k: v for k, v in sd.items() if k not in ('name', 'wz', 'ziel', 'tief', 'ziel_r', 'start', 'start_r')}))
+            log(f'  Schiff {sd["name"]}: {Lsum(rt) / 1852:.1f} sm bis {sd.get("ziel_name", "Ziel")}, Wassertiefe ≥ {tief:.1f} m, Abstand zu Start/Ziel ×{skal}')
+        except Exception as ex:
+            log(f'  WARNUNG Schiff {sd.get("name")}: {ex}')
     log(f'  {len(wahrz)} Wahrzeichen (Kirchen, Tore, Museen, Schiffe …)')
     # --- Hafen-Ausschnitte (4 m)
     haefen = []
@@ -685,13 +747,34 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         open(os.path.join(aus, name), 'wb').write(zlib.compress(b'RKH2' + struct.pack('<iiHHH', int(x0), int(y0), kcs, nxk, nyk) + zcm.tobytes() + mskk.tobytes(), 9))
         haefen.append(dict(name=kd['name'], file=name, x0=int(x0), y0=int(y0), cs=kcs, n=max(nxk, nyk), nx=nxk, ny=nyk, art='kreide', stege=[]))
         log(f'  Kliffs {kd["name"]}: {nxk * kcs / 1000:.1f} × {nyk * kcs / 1000:.1f} km, {nk} Kliff-Linien, Kreide {(mskk == 5).mean() * 100:.1f} %, Kies {(mskk == 4).mean() * 100:.1f} %, höchste Wand {float(np.where(mskk == 5, zk, 0).max()):.0f} m')
+    # --- Straßennetz (Autobahn bis Wohnstraße) als eigene Datei
+    SKL = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential']
+    wege = []; npt = 0
+    for f_ in env:
+        if f_.get('c') != 'road' or f_.get('t') != 'L':
+            continue
+        k = (f_.get('s') or '').replace('_link', '')
+        if k not in SKL:
+            continue
+        g = f_['g']
+        if len(g) < 4:
+            continue
+        wege.append([SKL.index(k)] + [int(round(v)) for v in g]); npt += len(g) // 2
+    gleise = []
+    for f_ in env:
+        if f_.get('c') == 'rail' and f_.get('t') == 'L' and len(f_['g']) >= 4:
+            gleise.append([int(round(v)) for v in f_['g']])
+    log(f'  Gleise: {len(gleise)} Stücke')
+    sname = f'{r}-spiel-strassen.bin'
+    open(os.path.join(aus, sname), 'wb').write(zlib.compress(json.dumps(dict(klassen=SKL, wege=wege, gleise=gleise), separators=(',', ':')).encode(), 9))
+    log(f'  Straßennetz: {len(wege)} Wege, {npt} Punkte')
     index = dict(format='regattakoje-revier-2', revier=r, name=cfg.get('spielname', meta['name']), attribution=meta['attribution'],
                  hinweis='Vereinfachte Regattabahnen entlang tiefem Wasser laut Datensatz. Keine Navigationskarte.',
                  origin_utm=meta['origin_utm'], size=meta['size'],
                  grid=dict(cs=gcs, nx=nx, ny=ny, tile=T, tiles=kacheln, tile_format='RKT1: <HHI nx,ny,nhaus> z int16 cm, landnutzung uint8, landabstand uint8, haeuser int16[6] (x,y m ab SW der Kachel, l*10, b*10, winkel*1000, h*10); zlib'),
                  overview=dict(file=uebersicht, cs=gcs * 2, nx=nxo, ny=nyo, format='z int16 cm, landnutzung uint8; zlib'),
                  lu_klassen={'1': 'Wald', '2': 'Ort', '3': 'Acker', '4': 'Strand', '5': 'Feuchtgebiet', '6': 'Gebüsch', '7': 'Wiese'},
-                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen, wahrzeichen=wahrz, bruecken=brk)
+                 land=land, seamarks=sm, places=places, lights=lights, courses=kurse, feuer=feuer, tuerme=tuerme, haefen=haefen, wahrzeichen=wahrz, bruecken=brk, strassen=sname, schiffe=schiffe)
     json.dump(index, open(os.path.join(aus, f'{r}-spiel.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     gr = sum(os.path.getsize(os.path.join(aus, k[2])) for k in kacheln)
     log(f'  Spieldaten: Index {os.path.getsize(os.path.join(aus, f"{r}-spiel.json")) / 1e6:.1f} MB, Übersicht {os.path.getsize(os.path.join(aus, uebersicht)) / 1e6:.1f} MB, Kacheln zusammen {gr / 1e6:.1f} MB')

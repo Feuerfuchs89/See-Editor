@@ -100,12 +100,26 @@ REVIERE['ruegen']['bruecken'] = [
 # Hängebrücke Sassnitz (2007): Fußgängerbrücke, 243 m, Hauptfeld 119 m, gekrümmt, ein Mast (Structurae)
 REVIERE['ruegen']['wahrzeichen_neu'] = [
     dict(n='Hängebrücke Sassnitz', art='haengebruecke', pos=(13.642122, 54.513219), l=243, feld=119, mast=38),
+    # Slawischer Burgwall Jaromarsburg am Kap Arkona (Wall quer über das Kap, bis 13 m hoch)
+    dict(n='Burgwall Jaromarsburg', art='burgwall', pos=(13.43654, 54.67708), r=190, h=11),
 ]
 # Stralsund: Speicher auf der Hafeninsel (Backstein, Steildach, Treppengiebel)
 REVIERE['ruegen']['speicher'] = [dict(name='Hafeninsel Stralsund', bbox=(13.0949, 54.3114, 13.1008, 54.3152), min_flaeche=600, h=24)]
+# Großschiffbahnen für Regatten mit bis zu 10 Gorch Focks: viel Platz (≥ 3 km frei) und ≥ 8 m Wassertiefe
+REVIERE['ruegen']['bahnen']['bahn_gfs'] = dict(name='Großschiffbahn vor Sassnitz (Gorch Fock)', nahe=(13.74, 54.51), r=9000, tief=8, cap=6000, min_frei=3000, gross=True)
+REVIERE['ruegen']['bahnen']['bahn_gft'] = dict(name='Großschiffbahn Tromper Wiek (Gorch Fock)', nahe=(13.45, 54.62), r=8000, tief=8, cap=6000, min_frei=3000, gross=True)
+# Gorch Fock I fährt (im Spiel) vom Liegeplatz in Stralsund bis vor Hiddensee und zurück
+REVIERE['ruegen']['schiffe'] = [dict(name='Gorch Fock', wz=r'Gorch Fock', ziel=(13.085, 54.495), ziel_name='vor Hiddensee (Gellen)', tief=4.0, kn=7),
+    # Linienschiffe und Kutter (Fahrplan im Spiel, weichen Regattabahnen sowie Start und Ziel aus)
+    dict(name='Hiddensee-Fähre', schiff='INSEL HIDDENSEE', typ='faehre', start=(13.1630, 54.5135), start_r=500, ziel=(13.1150, 54.5640), ziel_r=500, ziel_name='Vitte', tief=2.0, kn=10),
+    dict(name='Ausflugsschiff Kreideküste', schiff='BINZ', typ='ausflug', start=(13.6440, 54.5105), start_r=600, ziel=(13.6950, 54.5720), ziel_r=900, ziel_name='vor dem Königsstuhl', tief=3.0, kn=9),
+    dict(name='Bäderschiff Binz–Sellin', schiff='ADLER-MÖNCHGUT', typ='baeder', start=(13.6150, 54.4030), start_r=500, ziel=(13.6990, 54.3790), ziel_r=500, ziel_name='Seebrücke Sellin', tief=2.5, kn=9),
+    dict(name='Fischkutter SAS 12', typ='kutter', start=(13.6420, 54.5110), start_r=600, ziel=(13.8000, 54.5600), ziel_r=1500, ziel_name='Fanggebiet', tief=4.0, kn=8),
+]
 # Kreideküste Jasmund (Sassnitz – Königsstuhl – Lohme): feines Raster, Kliffs aus OSM natural=cliff
 REVIERE['ruegen']['kliffs'] = [
     dict(name='Kreideküste Jasmund', bbox=(13.6099, 54.5197, 13.6788, 54.5863), zelle=6),
+    dict(name='Kreideküste Kap Arkona', bbox=(13.4113, 54.6604, 13.4490, 54.6869), zelle=6),
 ]
 REVIERE['ruegen']['haefen'] = [
     dict(name='Stralsund', mitte=(13.09864, 54.31611), groesse=2800),
