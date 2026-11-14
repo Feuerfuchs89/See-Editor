@@ -135,13 +135,28 @@ def einpassen(see_feats):
         if best is None or rms < best[0]:
             best = (rms, s, th, t)
     rms, s, th, t = best
-    log(f'  Lage eingepasst: Maßstab {s:.4f}, Drehung {math.degrees(th):+.2f}°, Abweichung {rms:.1f} m (RMS)')
-    if rms > 25:
-        warn(f'Spiel-Ufer passt schlecht auf die OSM-Uferlinie ({rms:.0f} m) – Gelände kann versetzt sein')
-    M = s * np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]]); Mi = np.linalg.inv(M)
+    log(f'  Ähnlichkeit: Maßstab {s:.4f}, Drehung {math.degrees(th):+.2f}°, Abweichung {rms:.1f} m (RMS)')
+    # Feinanpassung affin (getrennte Maßstäbe Ost/Nord, Scherung) – robust: schlechteste 15 % je Runde ignorieren
+    M = s * np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
+    Ph = np.c_[P, np.ones(len(P))]
+    for _ in range(80):
+        Q = P @ M.T + t; dist, j = kd.query(Q); Z = D[j]
+        ok = dist <= np.quantile(dist, 0.85)
+        X_, *_ = np.linalg.lstsq(Ph[ok], Z[ok], rcond=None)
+        M, t = X_[:2].T, X_[2]
+    dist = kd.query(P @ M.T + t)[0]; rms_a = float(np.sqrt((dist ** 2).mean())); med = float(np.median(dist))
+    sx, sy = float(np.hypot(*M[:, 0])), float(np.hypot(*M[:, 1]))
+    log(f'  Affin: Maßstab Ost {sx:.4f}, Nord {sy:.4f}, Abweichung {rms_a:.1f} m (RMS), Median {med:.1f} m')
+    Mi = np.linalg.inv(M)
+    Ro = (R - t) @ Mi.T
+    log(f'  OSM-Ufer im Spielsystem: Ost {Ro[:, 0].min():.0f} … {Ro[:, 0].max():.0f}, Nord {Ro[:, 1].min():.0f} … {Ro[:, 1].max():.0f} '
+        f'(Spiel: {P[:, 0].min():.0f} … {P[:, 0].max():.0f}, {P[:, 1].min():.0f} … {P[:, 1].max():.0f})')
+    if med > 20:
+        warn(f'Spiel-Ufer passt schlecht auf die OSM-Uferlinie (Median {med:.0f} m) – Gelände kann versetzt sein')
     hin = lambda E, N: (np.stack([np.asarray(E, float), np.asarray(N, float)], -1) @ M.T + t)       # Spiel → UTM
     rueck = lambda X, Y: ((np.stack([np.asarray(X, float), np.asarray(Y, float)], -1) - t) @ Mi.T)  # UTM → Spiel
-    return hin, rueck, R, dict(massstab=round(s, 5), drehung=round(math.degrees(th), 3), rms=round(rms, 1))
+    return hin, rueck, R, dict(massstab=round(s, 5), drehung=round(math.degrees(th), 3), rms=round(rms_a, 1),
+                               median=round(med, 1), sx=round(sx, 5), sy=round(sy, 5))
 
 
 # ------------------------------------------------------------------ Gelände Sachsen (INSPIRE-ATOM)
