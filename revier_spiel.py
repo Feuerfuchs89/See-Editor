@@ -397,15 +397,17 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
             out.append(dict(n=wd['yacht'], art='yacht', x=int(round(yx)), y=int(round(yy)), h=14, dir=(a + 90) % 360, l=wd.get('yacht_l', 80),
                             g=[int(yx - 6), int(yy - 6), int(yx + 6), int(yy - 6), int(yx + 6), int(yy + 6), int(yx - 6), int(yy + 6)]))
         log(f'  Werft {wd["name"]}: {len(hallen)} Hallen, {len(kraene)} Kräne')
-    # Liegeschiffe (z. B. Kreuzfahrtschiff am Cruise Center): Landkante nahe pos, Schiff parallel zum Kai in tiefem Wasser
+    # Liegeschiffe (Kreuzfahrtschiff am Cruise Center, Fischkutter im Hafen, Kutter am Vereinssteg): Landkante nahe pos,
+    # Schiffe parallel zum Kai in ausreichend tiefem Wasser, mehrere nebeneinander ohne Überlappung
+    belegt = []
     for ls in cfg.get('liegeschiffe', []):
         if not (meta and Rn is not None):
             break
-        px, py = ll2m(*ls['pos']); R_ = ls.get('r', 500); Ls, Bs = ls['L'], ls['B']; best = None
-        T0 = ls.get('tief', 6.0)
-        for Ts, ab in [(T0, 4), (T0 - 2, 4), (T0 - 2, 15), (3.0, 10), (2.0, 25)]:
-            if best:
-                break
+        px, py = ll2m(*ls['pos']); R_ = ls.get('r', 500); Ls, Bs = ls['L'], ls['B']; T0 = ls.get('tief', 6.0); n_soll = ls.get('anzahl', 1)
+        kand = []
+        for Ts, ab in [(T0, 4), (T0 - 2, 4), (T0 - 2, 15), (3.0, 10), (2.0, 25), (0.8, 3)]:
+            if Ts <= 0 or len(kand) >= n_soll * 4:
+                continue
             for ring in meta['land'] + meta.get('binnen', []):
                 for k in range(len(ring)):
                     (ax, ay), (bx, by) = ring[k - 1][:2], ring[k][:2]
@@ -415,7 +417,7 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
                     if L_ < 1:
                         continue
                     ex, ey = (bx - ax) / L_, (by - ay) / L_
-                    for t in np.arange(0, L_, 10.0):
+                    for t in np.arange(0, L_, max(4.0, min(10.0, Ls / 3))):
                         x, y = ax + ex * t, ay + ey * t
                         if math.hypot(x - px, y - py) > R_:
                             continue
@@ -425,15 +427,20 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
                             if Rn.depth(x - nx * 45, y - ny * 45) >= 0.5:
                                 continue
                             if all(Rn.depth(cx_ + ex * f * Ls / 2 + nx * o, cy_ + ey * f * Ls / 2 + ny * o) >= (min(Ts, 1.5) if o < 0 else Ts) for f in (-1, -0.5, 0, 0.5, 1) for o in (-Bs / 2, 0, Bs / 2)):
-                                d = math.hypot(x - px, y - py)
-                                if best is None or d < best[0]:
-                                    best = (d, cx_, cy_, math.degrees(math.atan2(ex, ey)) % 360, Ts)
-        if not best:
+                                kand.append((math.hypot(x - px, y - py), cx_, cy_, math.degrees(math.atan2(ex, ey)) % 360, Ts))
+        kand.sort(key=lambda q: q[0]); gesetzt = 0; namen = ls.get('namen') or [ls.get('schiff', '')]
+        for d, cx_, cy_, dg, Ts in kand:
+            if gesetzt >= n_soll:
+                break
+            if any(math.hypot(cx_ - q[0], cy_ - q[1]) < (Ls + q[2]) / 2 + 3 for q in belegt):
+                continue
+            belegt.append((cx_, cy_, Ls))
+            out.append(dict(n=ls['n'] + (f' {gesetzt + 1}' if n_soll > 1 else ''), art='kreuzfahrt', typ=ls.get('typ', 'aida'), schiff=namen[gesetzt % len(namen)], x=int(round(cx_)), y=int(round(cy_)),
+                            h=max(6, round(Ls / 6)), dir=round(dg, 1), g=[int(cx_ - 4), int(cy_ - 4), int(cx_ + 4), int(cy_ - 4), int(cx_ + 4), int(cy_ + 4), int(cx_ - 4), int(cy_ + 4)]))
+            gesetzt += 1
+        if not gesetzt:
             log(f'  WARNUNG Liegeschiff {ls["n"]}: kein Liegeplatz am Kai gefunden'); continue
-        _, cx_, cy_, dg, Ts = best
-        out.append(dict(n=ls['n'], art='kreuzfahrt', typ=ls.get('typ', 'aida'), schiff=ls.get('schiff', ''), x=int(round(cx_)), y=int(round(cy_)), h=40, dir=round(dg, 1),
-                        g=[int(cx_ - 8), int(cy_ - 8), int(cx_ + 8), int(cy_ - 8), int(cx_ + 8), int(cy_ + 8), int(cx_ - 8), int(cy_ + 8)]))
-        log(f'  Liegeschiff {ls["n"]}: am Kai, {best[0]:.0f} m vom Wunschplatz, Wassertiefe laut Daten ≥ {Ts:.1f} m')
+        log(f'  Liegeschiffe {ls["n"]}: {gesetzt} von {n_soll} am Kai')
     # Bauwerke, die in den Daten fehlen (Lage nach Recherche)
     for d in cfg.get('wahrzeichen_neu', []):
         x, y = ll2m(*d['pos'])

@@ -140,8 +140,13 @@ REVIERE['ruegen']['schiffe'] = [dict(name='Gorch Fock', wz=r'Gorch Fock', ziel=(
     dict(name='Hiddensee-Fähre', schiff='INSEL HIDDENSEE', typ='faehre', start=(13.1630, 54.5135), start_r=500, ziel=(13.1150, 54.5640), ziel_r=500, ziel_name='Vitte', tief=2.0, kn=10),
     dict(name='Ausflugsschiff Kreideküste', schiff='BINZ', typ='ausflug', start=(13.6440, 54.5105), start_r=600, ziel=(13.6950, 54.5720), ziel_r=900, ziel_name='vor dem Königsstuhl', tief=3.0, kn=9),
     dict(name='Bäderschiff Binz–Sellin', schiff='ADLER-MÖNCHGUT', typ='baeder', start=(13.6150, 54.4030), start_r=500, ziel=(13.6990, 54.3790), ziel_r=500, ziel_name='Seebrücke Sellin', tief=2.5, kn=9),
-    dict(name='Fischkutter SAS 12', typ='kutter', start=(13.6420, 54.5110), start_r=600, ziel=(13.8000, 54.5600), ziel_r=1500, ziel_name='Fanggebiet', tief=4.0, kn=8),
+    dict(name='Fischkutter SAS 12', typ='kutter', schiff='SAS 12', start=(13.6420, 54.5110), start_r=600, ziel=(13.8000, 54.5600), ziel_r=1500, ziel_name='Fanggebiet', tief=4.0, kn=8),
+    dict(name='Fischkutter SAS 7', typ='kutter', schiff='SAS 7', start=(13.6440, 54.5120), start_r=600, ziel=(13.8800, 54.6300), ziel_r=1500, ziel_name='Fanggebiet Nord', tief=4.0, kn=8),
+    dict(name='Fischkutter SAS 21', typ='kutter', schiff='SAS 21', start=(13.6400, 54.5100), start_r=600, ziel=(13.9200, 54.4700), ziel_r=1500, ziel_name='Fanggebiet Ost', tief=4.0, kn=7.5),
+    dict(name='Fischkutter SAS 104', typ='kutter', schiff='SAS 104', start=(13.6450, 54.5125), start_r=600, ziel=(13.7300, 54.6700), ziel_r=1500, ziel_name='Fanggebiet vor Arkona', tief=4.0, kn=8.5),
 ]
+# Fischkutter im Sassnitzer Hafen (liegen am Kai)
+REVIERE['ruegen']['liegeschiffe'] = [dict(n='Fischkutter Sassnitz', typ='kutter', namen=['SAS 33', 'SAS 3', 'SAS 18', 'SAS 61', 'SAS 9', 'SAS 44'], pos=(13.6420, 54.5118), r=550, L=20.5, B=6.4, tief=3.0, anzahl=6)]
 # ------------------------------------------------------------------ Usedom
 REVIERE['usedom']['kurse'] = {
     'haff': dict(name='Peenestrom–Haff (Wolgast → Ueckermünde)', kurz='Wolgast → Peenestrom → Zecheriner Brücke → Kleines Haff → Ueckermünde',
@@ -196,7 +201,9 @@ REVIERE['rostock']['haefen'] = [   # 4-m-Raster entlang der ganzen Warnow: Stadt
 ]
 REVIERE['rostock']['werften'] = [dict(name='Neptun Werft', re=r'Neptun', schrift='NEPTUN WERFT', schrift2='', kraene=3, abstand=70)]
 # Kreuzfahrtschiff am Warnemünde Cruise Center (Liegeplatz wird am Kai gesucht)
-REVIERE['rostock']['liegeschiffe'] = [dict(n='AIDAdiva', typ='aida', schiff='AIDAdiva', pos=(12.0925, 54.1775), r=600, L=252, B=32, tief=7.0)]
+REVIERE['rostock']['liegeschiffe'] = [dict(n='AIDAdiva', typ='aida', schiff='AIDAdiva', pos=(12.0925, 54.1775), r=600, L=252, B=32, tief=7.0),
+    # Seesport an der Uferpromenade (Gehlsdorf, Rostock-Ost): Kutter ZK 10 am Steg
+    dict(n='Kutter Seesport Rostock', typ='zk10', pos=(12.1215, 54.0957), r=450, L=10.0, B=2.6, tief=1.0, anzahl=5)]
 # Linienverkehr: Fähren nach Gedser und Trelleborg, Warnowfähre, Hafenrundfahrt (Modelle nach Maßen und Reedereifarben)
 REVIERE['rostock']['schiffe'] = [
     dict(name='Scandlines Berlin (Rostock–Gedser)', schiff='BERLIN', typ='scandlines', start=(12.1040, 54.1525), start_r=500, ziel=(12.1500, 54.2650), ziel_r=1500, ziel_name='Kurs Gedser', tief=7.0, kn=18),
