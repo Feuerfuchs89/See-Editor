@@ -155,7 +155,8 @@ def einpassen(see_feats):
     Ro = rueck(R[:, 0], R[:, 1])
     Ro = rb.dp(Ro, 2.0)
     return hin, rueck, R, dict(sx=round(sx, 5), sy=round(sy, 5), drehung=round(dreh, 3), median=round(med, 1), rms=round(rms, 1),
-                               gespiegelt=bool(np.linalg.det(M) < 0), osm_ufer=[[round(float(a), 1), round(float(b), 1)] for a, b in Ro])
+                               gespiegelt=bool(np.linalg.det(M) < 0), utm33_M=[[float(v) for v in r] for r in M], utm33_t=[float(v) for v in t],
+                               formel='UTM33 (ETRS89, Meridian 15°) = utm33_M · [Ost, Nord]ᵀ + utm33_t', osm_ufer=[[round(float(a), 1), round(float(b), 1)] for a, b in Ro])
 
 
 # ------------------------------------------------------------------ Gelände Sachsen (INSPIRE-ATOM)

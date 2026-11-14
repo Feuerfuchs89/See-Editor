@@ -854,14 +854,15 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         nah |= np.asarray(hm) > 0
         wasser = msk == 0
         kante = (msk == 1) & ndimage.binary_dilation(wasser, iterations=2)
-        msk[kante & nah] = 3
+        if hf.get('kai', True):
+            msk[kante & nah] = 3
         jj, ii = np.mgrid[0:n_, 0:n_]
         Xc = x0 + (ii + 0.5) * hcs; Yc = y1 - (jj + 0.5) * hcs
         fx = Xc / cs - 0.5; fy = (H - Yc) / cs - 0.5; i0 = np.clip(np.floor(fx).astype(int), 0, Zn.shape[1] - 2); j0 = np.clip(np.floor(fy).astype(int), 0, Zn.shape[0] - 2)
         tx = fx - i0; ty = fy - j0
         zc = (Zn[j0, i0] * (1 - tx) + Zn[j0, i0 + 1] * tx) * (1 - ty) + (Zn[j0 + 1, i0] * (1 - tx) + Zn[j0 + 1, i0 + 1] * tx) * ty
         tief = hf.get('tiefe', 3.0)
-        z = np.where(msk == 0, np.minimum(zc, -tief), np.where(msk == 2, 1.8, np.where(msk == 3, np.maximum(zc, 1.9), np.maximum(zc, 1.6))))
+        z = np.where(msk == 0, np.minimum(zc, -tief), np.where(msk == 2, hf.get('pier_z', 1.8), np.where(msk == 3, np.maximum(zc, 1.9), np.maximum(zc, hf.get('land_z', 1.6)))))
         rand = np.zeros_like(msk, bool); rand[:2, :] = rand[-2:, :] = rand[:, :2] = rand[:, -2:] = True
         z = np.where(rand, zc, z)                       # Rand passt zum groben Gelände
         zcm = np.clip(np.round(z * 100), -32767, 32767).astype('<i2')

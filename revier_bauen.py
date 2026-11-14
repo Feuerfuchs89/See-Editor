@@ -80,6 +80,19 @@ REVIERE = {
         durchstiche=[dict(name='Lietzow', von=(13.49805, 54.47880), bis=(13.49752, 54.47962), breite=30, tief=2.2)],
         spiel=dict(zelle=40, kachel=400, haeuser_je_kachel=9000),
     ),
+    'cospu': dict(
+        name='Cospudener See (Leipzig)',
+        spielname='Cospudener See',
+        # See (OSM-Relation 285950) mit 2,6 km Umland; Ufer/Gelände/Tiefen/Gebäude: siehe see_cospu.py
+        bbox=(12.28, 51.22, 12.39, 51.31),
+        zelle=20, maske=5, ufer_tol=0.5, hang=0.0,
+        see_rel=285950,
+        osm='https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf',
+        umg_extra=['nwr/man_made=water_tower', 'nwr/tourism=viewpoint'],
+        ohne_osm_stege=True,     # Stege am LSC/Zöbigker kommen aus dem Aufmaß des Spiels, nicht aus OSM
+        regatten=['Regatta Cospudener See'],
+        spiel=dict(zelle=20, kachel=250, haeuser_je_kachel=12000, haus_abstand=2600, land_tol=2, land_min=200),
+    ),
 }
 
 # Fertige Kurse (Länge/Breite) – die Bahn wird automatisch durch Wasser ab 1,5 m gelegt
@@ -384,6 +397,8 @@ def osm_daten(netz, geb, cfg, mit_umgebung=True):
     """Liefert {'kueste': [...], 'seezeichen': [...], 'umgebung': [...]} als GeoJSON-Features."""
     import shutil, subprocess
     teile = [t for t in TEILE if (mit_umgebung or t != 'umgebung') and (t != 'binnen' or cfg.get('binnen'))]
+    if cfg.get('see_rel'):
+        teile.append('see')
     ziel = {t: netz._pfad(f'osm_{t}.geojsonseq') for t in teile}
     if not all(os.path.exists(v) for v in ziel.values()):
         if netz.offline:
@@ -408,7 +423,12 @@ def osm_daten(netz, geb, cfg, mit_umgebung=True):
         json.dump({'linear_tags': True, 'area_tags': False}, open(konf, 'w'))
         for t in teile:
             f = netz._pfad(f'osm_{t}.osm.pbf')
-            lauf('tags-filter', rev, *TEILE[t], '-o', f, '--overwrite')
+            if t == 'see':      # Seeufer: ganze Relation samt Inseln (Multipolygon), Mitglieder werden mitgenommen
+                lauf('getid', '-r', rev, f'r{cfg["see_rel"]}', '-o', f, '--overwrite')
+                lauf('export', f, '-f', 'geojsonseq', '-x', 'print_record_separator=false', '-a', 'type,id', '-o', ziel[t], '--overwrite')
+                continue
+            flt = TEILE[t] + (list(cfg.get('umg_extra', [])) if t == 'umgebung' else [])
+            lauf('tags-filter', rev, *flt, '-o', f, '--overwrite')
             extra = ['-c', konf] if t == 'kueste' else []      # Küste als Linien: Wegrichtung (Land links) bleibt erhalten
             lauf('export', f, '-f', 'geojsonseq', '-x', 'print_record_separator=false', '-a', 'type,id', *extra, '-o', ziel[t], '--overwrite')
     out = {}
@@ -1031,6 +1051,7 @@ def umgebung(osm, geb, std):
         f = dict(c=c, osm=uid)
         if t.get('name'): f['n'] = t['name']
         if h: f['h'] = round(h, 1); f['hs'] = hs
+        if c == 'building' and t.get('roof:shape'): f['rf'] = str(t['roof:shape'])[:12]
         sub = t.get('highway') or t.get('place') or t.get('landuse') or t.get('natural') or t.get('man_made') or t.get('leisure') or t.get('waterway')
         if sub: f['s'] = sub
         typ = g.get('type')
@@ -1091,10 +1112,8 @@ def vorschau(cm, wm, teile, nx, ny, pfad):
 
 # ------------------------------------------------------------------ Hauptprogramm
 def main():
-    if 'cospu' in sys.argv[1:]:          # Cospudener See: eigenes Umland-Skript (Gelände, Landnutzung, Gebäude)
-        import umland_cospu
-        umland_cospu.hauptteil()
-        return
+    if __name__ == '__main__':     # see_cospu/umland_cospu importieren revier_bauen: dieselbe Modulinstanz (gemeinsame Warnliste)
+        sys.modules.setdefault('revier_bauen', sys.modules['__main__'])
     ap = argparse.ArgumentParser(description='Seekoje Revier-Bauer')
     ap.add_argument('revier', nargs='?', default='hiddensee', choices=sorted(REVIERE))
     ap.add_argument('--cache', default='.revier-cache', help='Zwischenspeicher für Downloads')
@@ -1108,7 +1127,12 @@ def main():
     netz = Netz(a.cache, a.offline)
 
     osm = osm_daten(netz, geb, cfg, not a.ohne_umgebung)
-    teile, land, wf = kueste(osm['kueste'], geb, cfg)
+    lage_j = None
+    if cfg.get('see_rel'):       # Binnensee (Cospudener See): Ufer aus OSM-Relation, Tiefen als Modell – siehe see_cospu.py
+        import see_cospu
+        teile, land, wf, lage_j = see_cospu.vorbereiten(osm, geb, cfg)
+    else:
+        teile, land, wf = kueste(osm['kueste'], geb, cfg)
     mim = maske(teile, geb.W, geb.H, cfg['maske'])
     bring = binnen(osm.get('binnen', []), geb, cfg, mim) if cfg.get('binnen') else []
     # Durchlässe (z. B. Lietzow zwischen Großem und Kleinem Jasmunder Bodden): schmale Rinne als Wasser
@@ -1125,10 +1149,16 @@ def main():
         mim = maske(teile, geb.W, geb.H, cfg['maske'], bring)
     else:
         bim = None
-    cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim, durch)
-    pkt, lin = seezeichen(osm['seezeichen'], geb)
     std = dict(gebaeude=8.0, wald=15.0)
     env = [] if a.ohne_umgebung else umgebung(osm['umgebung'], geb, std)
+    if cfg.get('ohne_osm_stege'):
+        env = [f for f in env if f['c'] != 'pier']
+    if cfg.get('see_rel'):
+        cm, wm, quellen, (nx, ny) = see_cospu.gelaende(netz, geb, cfg, mim, teile, env)
+    else:
+        cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim, durch)
+    attr = quellen.pop('attribution', ATTRIBUTION)
+    pkt, lin = seezeichen(osm['seezeichen'], geb)
 
     o84 = geb.to_ll(0, 0); n84 = geb.to_ll(geb.W, geb.H)
     rnd = lambda P: [[round(float(p[0]), 1), round(float(p[1]), 1)] for p in P]
@@ -1136,8 +1166,9 @@ def main():
     meta = dict(
         format='seekoje-revier-1', revier=r, name=cfg['name'], regatten=cfg.get('regatten', []),
         erstellt=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds'),
-        hinweis='KEINE Navigationskarte. Tiefen grob (ca. 115 m Quellraster) und geglättet, Stand der Quelldaten unbekannt.',
-        attribution=ATTRIBUTION,
+        hinweis=('KEINE Navigationskarte. Seetiefen sind ein MODELL nach bekannten Seewerten (keine Messung).' if lage_j else
+                 'KEINE Navigationskarte. Tiefen grob (ca. 115 m Quellraster) und geglättet, Stand der Quelldaten unbekannt.'),
+        attribution=attr,
         license_note='Abgeleitete Datenbank aus OpenStreetMap (ODbL 1.0): bei Weitergabe unter ODbL stellen. Im Spiel sichtbar nennen.',
         crs='EPSG:25833', units='m', axes='x = Ost, y = Nord, Ursprung = Südwest-Ecke des Reviers',
         origin_utm=dict(x=geb.ox, y=geb.oy), size=dict(w=geb.W, h=geb.H),
@@ -1178,9 +1209,13 @@ def main():
               open(P('umgebung.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     vorschau(cm, wm, teile, nx, ny, P('vorschau.png'))
     open(P('namensnennung.txt'), 'w', encoding='utf-8').write(
-        f'Revier {cfg["name"]} – Datenquellen (im Spiel sichtbar nennen)\n\n' + '\n'.join(ATTRIBUTION) +
+        f'Revier {cfg["name"]} – Datenquellen (im Spiel sichtbar nennen)\n\n' + '\n'.join(attr) +
         '\n\nHinweise:\n- OpenStreetMap: Die Revierdateien sind eine abgeleitete Datenbank (ODbL 1.0). Bilder/Spielszenen daraus sind „Produced Work“ und brauchen die Nennung.\n'
         '- EMODnet und Copernicus DEM: Namensnennung nötig.\n- KEINE Navigationskarte. Keine Rechtsberatung.\n')
+    if lage_j:
+        lage_j['wasserspiegel_nhn'] = quellen.get('wasserspiegel_nhn')
+        json.dump(lage_j, open(P('lage.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
+        log(f'  {r}-lage.json geschrieben')
     if cfg.get('spiel'):
         import revier_spiel
         try:
