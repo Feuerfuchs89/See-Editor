@@ -31,24 +31,24 @@ ZIEL = 'cospu-umland.json'
 
 # Uferlinie des Spiels (COSPU_PTS, nur Ost/Nord)
 COSPU_PTS = json.loads(
-'[[116,-1995],[-28,-1994],[-60,-1944],[-132,-1901],[-409,-1632],[-464,-1551],[-484,-1547],[-525,-1459],[-627,-1317],'
-'[-607,-1254],[-612,-1236],[-637,-1198],[-645,-1152],[-678,-1124],[-809,-962],[-836,-528],[-850,-503],[-862,-436],'
-'[-901,-367],[-910,-343],[-932,-291],[-956,-201],[-994,-63],[-996,33],[-994,47],[-992,57],[-990,72],[-965,182],'
-'[-935,271],[-896,385],[-878,427],[-841,509],[-784,602],[-760,662],[-761,691],[-776,712],[-767,749],[-741,762],'
-'[-718,791],[-706,834],[-704,915],[-687,958],[-680,1001],[-710,1067],[-719,1115],[-744,1170],[-773,1256],[-783,1303],'
-'[-780,1321],[-771,1340],[-753,1356],[-702,1368],[-688,1384],[-669,1431],[-664,1457],[-647,1477],[-643,1496],'
-'[-611,1553],[-579,1592],[-552,1612],[-471,1660],[-385,1691],[-276,1706],[-205,1719],[-171,1740],[-130,1745],'
-'[-56,1730],[29,1729],[66,1715],[121,1714],[184,1703],[220,1712],[263,1712],[297,1745],[351,1800],[379,1833],'
-'[396,1866],[407,1919],[438,1951],[473,1975],[510,1987],[537,1995],[565,1993],[607,1983],[637,1966],[671,1937],'
-'[686,1906],[693,1874],[706,1829],[729,1763],[750,1708],[767,1674],[786,1643],[803,1603],[820,1555],[840,1488],'
-'[846,1442],[849,1410],[850,1370],[841,1340],[845,1319],[842,1271],[846,1218],[860,1173],[876,1142],[896,1103],'
-'[916,1052],[934,1001],[946,964],[961,898],[974,822],[982,739],[985,616],[982,566],[983,515],[994,453],[996,388],'
-'[994,330],[981,277],[960,243],[921,177],[894,150],[869,121],[856,81],[853,46],[852,12],[838,-28],[812,-76],'
-'[781,-110],[734,-136],[702,-166],[681,-191],[652,-226],[611,-249],[578,-263],[555,-288],[540,-305],[514,-330],'
-'[486,-372],[463,-430],[438,-480],[413,-516],[389,-539],[356,-567],[318,-613],[295,-637],[255,-707],[230,-748],'
-'[206,-815],[194,-866],[184,-929],[183,-990],[185,-1045],[192,-1093],[202,-1137],[234,-1207],[264,-1259],'
-'[311,-1336],[350,-1394],[391,-1477],[408,-1530],[419,-1588],[418,-1651],[407,-1700],[383,-1756],[347,-1813],'
-'[302,-1876],[250,-1929],[201,-1963],[160,-1982],[116,-1995]]')
+'[[116,-1995],[-28,-1994],[-60,-1944],[-132,-1901],[-409,-1632],[-464,-1551],[-484,-1547],[-525,-1459],[-627,-1'
+'317],[-607,-1254],[-612,-1236],[-637,-1198],[-645,-1152],[-678,-1124],[-809,-962],[-836,-528],[-850,-503],[-86'
+'3,-381],[-914,-337],[-918,-311],[-883,-221],[-910,-114],[-956,-22],[-987,22],[-996,50],[-992,57],[-544,1034],['
+'-518,1121],[-396,1371],[-336,1464],[-268,1555],[-213,1668],[-124,1811],[-62,1888],[-38,1908],[-13,1918],[21,19'
+'18],[39,1924],[54,1949],[84,1973],[100,1977],[128,1972],[134,1967],[134,1954],[150,1944],[188,1944],[203,1955]'
+',[206,1972],[193,1962],[171,1967],[151,1964],[150,1975],[158,1989],[219,1995],[243,1991],[265,1974],[297,1964]'
+',[298,1943],[294,1938],[251,1958],[239,1955],[238,1942],[262,1926],[288,1919],[304,1921],[314,1931],[328,1929]'
+',[338,1922],[363,1878],[422,1820],[431,1784],[425,1761],[418,1753],[422,1729],[439,1730],[471,1755],[515,1747]'
+',[627,1686],[740,1637],[751,1626],[742,1598],[786,1679],[809,1672],[808,1627],[775,1600],[767,1585],[792,1609]'
+',[809,1615],[842,1592],[850,1581],[846,1576],[852,1580],[904,1536],[985,1411],[996,1342],[962,1255],[955,1215]'
+',[929,1145],[835,961],[827,923],[836,881],[863,827],[885,731],[887,666],[862,587],[830,561],[807,514],[770,389'
+'],[759,308],[727,244],[700,216],[686,183],[687,137],[639,13],[592,-84],[563,-113],[513,-207],[513,-229],[521,-'
+'256],[539,-275],[524,-293],[540,-305],[557,-319],[566,-308],[605,-362],[615,-354],[625,-366],[620,-370],[627,-'
+'382],[610,-397],[618,-413],[612,-444],[580,-510],[513,-566],[497,-567],[470,-558],[368,-571],[345,-597],[327,-'
+'640],[281,-714],[247,-703],[236,-661],[227,-581],[215,-579],[197,-590],[166,-744],[152,-748],[140,-745],[108,-'
+'584],[82,-574],[19,-577],[-24,-594],[-73,-635],[-91,-659],[-80,-724],[-90,-744],[-43,-847],[17,-1009],[48,-115'
+'0],[83,-1219],[95,-1288],[110,-1308],[93,-1320],[88,-1344],[76,-1357],[62,-1354],[88,-1394],[68,-1418],[73,-14'
+'48],[62,-1487],[143,-1656],[117,-1746],[112,-1821],[181,-1947],[170,-1984],[146,-1994]]')
 
 ATTR = ['© OpenStreetMap-Mitwirkende, ODbL 1.0 (openstreetmap.org/copyright)']
 
@@ -98,7 +98,17 @@ def polys(geom):
 
 
 # ------------------------------------------------------------------ Lage: OSM-Ufer → Spiel-Ufer
+def _dicht(R, schritt):
+    d = []
+    for i in range(len(R) - 1):
+        a, b = R[i], R[i + 1]; n = max(1, int(np.hypot(*(b - a)) / schritt))
+        d.append(a + (b - a) * (np.arange(n)[:, None] / n))
+    return np.vstack(d)
+
+
 def einpassen(see_feats):
+    """Spiel-Uferlinie affin auf die OSM-Uferlinie legen: Startwerte aus den Formmomenten mit Rundum-Suche
+    der Drehung, dann symmetrisches ICP (Spiel→OSM und OSM→Spiel), damit die Form nicht schrumpfen kann."""
     from scipy.spatial import cKDTree
     ringe = []
     for f in see_feats:
@@ -107,56 +117,45 @@ def einpassen(see_feats):
     if not ringe:
         raise RuntimeError(f'Seeufer (OSM-Relation {SEE_REL}) nicht gefunden')
     R = max(ringe, key=lambda r: abs(rb.flaeche(r)))
-    # dicht abtasten (1 m)
-    d = []
-    for i in range(len(R) - 1):
-        a, b = R[i], R[i + 1]; n = max(1, int(np.hypot(*(b - a))))
-        d.append(a + (b - a) * (np.arange(n)[:, None] / n))
-    D = np.vstack(d); kd = cKDTree(D)
-    P = np.array(COSPU_PTS, float)
-    def zentrum(Q):
-        x, y = Q[:, 0], Q[:, 1]; c = x * np.roll(y, -1) - np.roll(x, -1) * y; A = c.sum() / 2
-        return np.array([((x + np.roll(x, -1)) * c).sum() / (6 * A), ((y + np.roll(y, -1)) * c).sum() / (6 * A)])
+    log(f'  OSM-Ufer: {len(R)} Punkte, Fläche {abs(rb.flaeche(R)) / 1e6:.2f} km²')
+    D = _dicht(R, 1.0); kdO = cKDTree(D); Os = _dicht(R, 8.0)
+    P = np.array(COSPU_PTS, float); Pr = np.vstack([P, P[:1]]); Pd = _dicht(Pr, 4.0)
+    log(f'  Spiel-Ufer: {len(P)} Punkte, Fläche {abs(rb.flaeche(Pr)) / 1e6:.2f} km²')
+    def mom(Q):
+        m = Q.mean(0); C = np.cov((Q - m).T); w, V = np.linalg.eigh(C); return m, V @ np.diag(np.sqrt(w)) @ V.T, V @ np.diag(1 / np.sqrt(w)) @ V.T
+    mo, So, _ = mom(_dicht(R, 4.0)); mg, _, Sgi = mom(Pd)
+    def icp(M, t, runden):
+        for _ in range(runden):
+            d1, j = kdO.query(P @ M.T + t)
+            kdG = cKDTree(Pd @ M.T + t); d2, k = kdG.query(Os)
+            A = np.vstack([P, Pd[k]]); Z = np.vstack([D[j], Os]); dd = np.r_[d1, d2]
+            ok = dd <= np.quantile(dd, 0.9)
+            X_, *_ = np.linalg.lstsq(np.c_[A[ok], np.ones(ok.sum())], Z[ok], rcond=None)
+            M, t = X_[:2].T, X_[2]
+        d1 = kdO.query(P @ M.T + t)[0]; d2 = cKDTree(Pd @ M.T + t).query(Os)[0]
+        return M, t, float(np.median(np.r_[d1, d2])), float(np.sqrt((np.r_[d1, d2] ** 2).mean()))
     best = None
-    for th0 in (-0.05, 0.0, 0.05):
-        s, th = 1.0, th0; t = zentrum(R) - zentrum(P) @ np.array([[math.cos(th), math.sin(th)], [-math.sin(th), math.cos(th)]])
-        for _ in range(60):
-            M = s * np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-            Q = P @ M.T + t
-            _, j = kd.query(Q); Z = D[j]
-            # Umeyama (Ähnlichkeit)
-            mp, mz = P.mean(0), Z.mean(0); Pc, Zc = P - mp, Z - mz
-            U, S, Vt = np.linalg.svd(Zc.T @ Pc / len(P))
-            dd = np.sign(np.linalg.det(U @ Vt)); Sd = np.diag([1, dd])
-            Rm = U @ Sd @ Vt; s = float(np.trace(np.diag(S) @ Sd) / (Pc ** 2).sum() * len(P))
-            th = math.atan2(Rm[1, 0], Rm[0, 0]); t = mz - s * (Rm @ mp)
-        M = s * np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-        rms = float(np.sqrt((kd.query(P @ M.T + t)[0] ** 2).mean()))
-        if best is None or rms < best[0]:
-            best = (rms, s, th, t)
-    rms, s, th, t = best
-    log(f'  Ähnlichkeit: Maßstab {s:.4f}, Drehung {math.degrees(th):+.2f}°, Abweichung {rms:.1f} m (RMS)')
-    # Feinanpassung affin (getrennte Maßstäbe Ost/Nord, Scherung) – robust: schlechteste 15 % je Runde ignorieren
-    M = s * np.array([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]])
-    Ph = np.c_[P, np.ones(len(P))]
-    for _ in range(80):
-        Q = P @ M.T + t; dist, j = kd.query(Q); Z = D[j]
-        ok = dist <= np.quantile(dist, 0.85)
-        X_, *_ = np.linalg.lstsq(Ph[ok], Z[ok], rcond=None)
-        M, t = X_[:2].T, X_[2]
-    dist = kd.query(P @ M.T + t)[0]; rms_a = float(np.sqrt((dist ** 2).mean())); med = float(np.median(dist))
-    sx, sy = float(np.hypot(*M[:, 0])), float(np.hypot(*M[:, 1]))
-    log(f'  Affin: Maßstab Ost {sx:.4f}, Nord {sy:.4f}, Abweichung {rms_a:.1f} m (RMS), Median {med:.1f} m')
-    Mi = np.linalg.inv(M)
-    Ro = (R - t) @ Mi.T
-    log(f'  OSM-Ufer im Spielsystem: Ost {Ro[:, 0].min():.0f} … {Ro[:, 0].max():.0f}, Nord {Ro[:, 1].min():.0f} … {Ro[:, 1].max():.0f} '
-        f'(Spiel: {P[:, 0].min():.0f} … {P[:, 0].max():.0f}, {P[:, 1].min():.0f} … {P[:, 1].max():.0f})')
-    if med > 20:
+    for spiegel in (1, -1):
+        for grad in range(0, 360, 6):
+            w = math.radians(grad); Rw = np.array([[math.cos(w), -math.sin(w)], [math.sin(w), math.cos(w)]]) @ np.diag([1, spiegel])
+            M = So @ Rw @ Sgi; t = mo - M @ mg
+            M, t, med, rms = icp(M, t, 6)
+            if best is None or med < best[2]:
+                best = (M, t, med, rms, grad, spiegel)
+    M, t, med, rms, grad, spiegel = best
+    M, t, med, rms = icp(M, t, 80)
+    sx, sy = float(np.hypot(*M[:, 0])), float(np.hypot(*M[:, 1])); dreh = math.degrees(math.atan2(M[1, 0], M[0, 0]))
+    log(f'  Lage eingepasst: Maßstab Ost {sx:.4f}, Nord {sy:.4f}, Drehung {dreh:+.2f}°{" (gespiegelt!)" if np.linalg.det(M) < 0 else ""}, '
+        f'Abweichung Median {med:.1f} m, RMS {rms:.1f} m')
+    if med > 15:
         warn(f'Spiel-Ufer passt schlecht auf die OSM-Uferlinie (Median {med:.0f} m) – Gelände kann versetzt sein')
+    Mi = np.linalg.inv(M)
     hin = lambda E, N: (np.stack([np.asarray(E, float), np.asarray(N, float)], -1) @ M.T + t)       # Spiel → UTM
     rueck = lambda X, Y: ((np.stack([np.asarray(X, float), np.asarray(Y, float)], -1) - t) @ Mi.T)  # UTM → Spiel
-    return hin, rueck, R, dict(massstab=round(s, 5), drehung=round(math.degrees(th), 3), rms=round(rms_a, 1),
-                               median=round(med, 1), sx=round(sx, 5), sy=round(sy, 5))
+    Ro = rueck(R[:, 0], R[:, 1])
+    Ro = rb.dp(Ro, 2.0)
+    return hin, rueck, R, dict(sx=round(sx, 5), sy=round(sy, 5), drehung=round(dreh, 3), median=round(med, 1), rms=round(rms, 1),
+                               gespiegelt=bool(np.linalg.det(M) < 0), osm_ufer=[[round(float(a), 1), round(float(b), 1)] for a, b in Ro])
 
 
 # ------------------------------------------------------------------ Gelände Sachsen (INSPIRE-ATOM)
