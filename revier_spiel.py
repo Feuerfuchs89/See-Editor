@@ -42,35 +42,46 @@ class Raster:
         return -self.Z[j, i] if 0 <= j < self.ny and 0 <= i < self.nx else -99
 
 
-def astar(R, a, b, thr):
-    sj, si = R.ij(*a); tj, ti = R.ij(*b); Z = R.Z
+def astar(R, a, b, thr, extra=None, rand=3000):
+    """A* auf einem Ausschnitt um Start und Ziel (schnell auch auf großen Revieren)."""
+    sj, si = R.ij(*a); tj, ti = R.ij(*b); ny0, nx0 = R.Z.shape
+    if not (0 <= sj < ny0 and 0 <= si < nx0 and 0 <= tj < ny0 and 0 <= ti < nx0):
+        return None
+    m = int((rand + 0.4 * math.hypot(a[0] - b[0], a[1] - b[1])) / R.cs)
+    j0, j1 = max(0, min(sj, tj) - m), min(ny0, max(sj, tj) + m + 1); i0, i1 = max(0, min(si, ti) - m), min(nx0, max(si, ti) + m + 1)
+    Z = R.Z[j0:j1, i0:i1]; sj -= j0; tj -= j0; si -= i0; ti -= i0
     ok = (-Z) >= thr
     if not (ok[sj, si] and ok[tj, ti]):
         return None
     dep = np.clip(-Z, 0, 20); pen = 1 + 2.5 * np.clip(4 - dep, 0, 4) / 4
-    dist = np.full(Z.shape, np.inf, np.float32); dist[sj, si] = 0
-    prev = np.full(Z.shape, -1, np.int64)
-    h = lambda j, i: math.hypot(j - tj, i - ti)
-    pq = [(h(sj, si), 0.0, sj, si)]; ny, nx = Z.shape
+    if extra is not None:
+        pen = pen + extra[j0:j1, i0:i1]
+    pen = pen.astype(np.float32); okl = ok.tolist(); penl = pen.tolist()
+    ny, nx = Z.shape
+    dist = np.full(Z.shape, np.inf, np.float32); dist[sj, si] = 0; distl = dist.tolist()
+    prev = {}
+    wh = 1.0 if extra is None else 1.6
+    pq = [(wh * math.hypot(sj - tj, si - ti), 0.0, sj, si)]
     N8 = [(-1, 0, 1), (1, 0, 1), (0, -1, 1), (0, 1, 1), (-1, -1, 1.414), (-1, 1, 1.414), (1, -1, 1.414), (1, 1, 1.414)]
+    hyp = math.hypot; pop = heapq.heappop; push = heapq.heappush; fertig = False
     while pq:
-        f, d, j, i = heapq.heappop(pq)
+        f, d, j, i = pop(pq)
         if j == tj and i == ti:
-            break
-        if d > dist[j, i]:
+            fertig = True; break
+        if d > distl[j][i]:
             continue
         for dj, di, c in N8:
             J, I = j + dj, i + di
-            if 0 <= J < ny and 0 <= I < nx and ok[J, I]:
-                nd = d + c * pen[J, I]
-                if nd < dist[J, I]:
-                    dist[J, I] = nd; prev[J, I] = j * nx + i; heapq.heappush(pq, (nd + h(J, I), nd, J, I))
-    if prev[tj, ti] < 0:
+            if 0 <= J < ny and 0 <= I < nx and okl[J][I]:
+                nd = d + c * penl[J][I]
+                if nd < distl[J][I]:
+                    distl[J][I] = nd; prev[(J, I)] = (j, i); push(pq, (nd + wh * hyp(J - tj, I - ti), nd, J, I))
+    if not fertig:
         return None
     p = [(tj, ti)]
     while p[-1] != (sj, si):
-        k = prev[p[-1]]; p.append((k // nx, k % nx))
-    return [R.xy(j, i) for j, i in p[::-1]]
+        p.append(prev[p[-1]])
+    return [R.xy(j + j0, i + i0) for j, i in p[::-1]]
 
 
 def los(R, a, b, thr, buf=30):
@@ -105,12 +116,15 @@ def zusammenfassen(R, pts, thr, buf=30, minlen=250):
     return out
 
 
-def route(R, anker, thr0=1.5):
+def route(R, anker, thr0=1.5, extra=None):
     out = []
     for a, b in zip(anker, anker[1:]):
         p = None
-        for thr in (thr0, thr0 - 0.2, thr0 - 0.4):
-            p = astar(R, a, b, thr)
+        for rand in (3000, 20000):
+            for thr in (thr0, thr0 - 0.2, thr0 - 0.4):
+                p = astar(R, a, b, thr, extra, rand)
+                if p:
+                    break
             if p:
                 break
         if not p:
@@ -634,22 +648,40 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
             u1 = np.subtract(b, a); u1 /= np.linalg.norm(u1); u2 = np.subtract(c, b); u2 /= np.linalg.norm(u2); u = u1 + u2
             if np.linalg.norm(u) < 1e-6:
                 u = u1
-            u /= np.linalg.norm(u); l_, r_ = tor_breite(Rn, b, u); hw = max(25, min(l_, r_, 150)); nb = name_bei(b)
+            u /= np.linalg.norm(u); l_, r_ = tor_breite(Rk, b, u); hw = max(25, min(l_, r_, 150)); nb = name_bei(b)
             G.append(dict(x=round(b[0]), y=round(b[1]), u=[round(float(u[0]), 4), round(float(u[1]), 4)], hw=int(hw), name=f'Tor {k}' + (' · ' + nb if nb else '')))
-        a, b = rt[-2], rt[-1]; u = np.subtract(b, a); u /= np.linalg.norm(u); l_, r_ = tor_breite(Rn, b, u)
+        a, b = rt[-2], rt[-1]; u = np.subtract(b, a); u /= np.linalg.norm(u); l_, r_ = tor_breite(Rk, b, u)
         fin = dict(x=round(b[0]), y=round(b[1]), u=[round(float(u[0]), 4), round(float(u[1]), 4)], hw=int(max(30, min(l_, r_, 90))), name=ziel_name)
         return G, fin
     Lsum = lambda s: sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(s, s[1:]))
+    # Kurs-Raster: Marinas und Stege sind kein Fahrwasser, Kurse halten sich in der Mitte des Fahrwassers
+    Zk = Zn.copy()
+    if cfg.get('kurse'):
+        sim = Image.new('L', (Zn.shape[1], Zn.shape[0]), 0); sd = ImageDraw.Draw(sim)
+        tp = lambda x, y: (x / cs, (H - y) / cs)
+        for f_ in env:
+            c_ = f_.get('c'); g_ = f_.get('g')
+            if c_ == 'harbor' and f_.get('s') == 'marina' and f_.get('t') in ('P', 'L') and g_:
+                q = g_[0] if f_.get('t') == 'P' else g_
+                if len(q) >= 6 and (f_.get('t') == 'P' or (abs(q[0] - q[-2]) < 1 and abs(q[1] - q[-1]) < 1)):
+                    sd.polygon([tp(q[i], q[i + 1]) for i in range(0, len(q) - 1, 2)], fill=1)
+            elif c_ == 'pier' and f_.get('s') in ('pier', 'breakwater', 'groyne') and f_.get('t') == 'L' and g_ and len(g_) >= 4:
+                sd.line([tp(g_[i], g_[i + 1]) for i in range(0, len(g_) - 1, 2)], fill=1, width=max(1, int(round(12 / cs)) + 1))
+        sperr = np.asarray(sim).astype(bool)
+        Zk[sperr & (Zk < 0)] = 0.5
+        log(f'  Kurse: {int(sperr.sum() * cs * cs / 1e4)} ha Marinas/Stege gesperrt')
+    Rk = Raster(Zk, cs, H); CLRk = ndimage.distance_transform_edt((-Zk) >= 1.4) * cs
+    mitte = 2.0 * np.clip(1 - CLRk / 150.0, 0, 1)
     kurse = {}
     for key, k in cfg.get('kurse', {}).items():
         try:
             if not all(0 <= q[0] <= W and 0 <= q[1] <= H for q in [ll2m(*k['start']), ll2m(*k['ziel'])] + [ll2m(*p) for p in k.get('anker', [])]):
                 raise RuntimeError('liegt teilweise außerhalb des Reviers')
-            st, _ = bester_platz(CLR, Rn, *ll2m(*k['start']), k.get('start_r', 2000))
+            st, _ = bester_platz(CLRk, Rk, *ll2m(*k['start']), k.get('start_r', 2000))
             def nass(pt, r=1500):
-                return pt if Rn.depth(*pt) >= 1.5 else bester_platz(CLR, Rn, pt[0], pt[1], r)[0]
+                return pt if (Rk.depth(*pt) >= 1.5 and CLRk[Rk.ij(*pt)] >= 60) else bester_platz(CLRk, Rk, pt[0], pt[1], r)[0]
             anker = [st] + [nass(ll2m(*p)) for p in k.get('anker', [])] + [nass(ll2m(*k['ziel']), 800)]
-            rt = route(Rn, anker)
+            rt = route(Rk, anker, extra=mitte)
             G, fin = tore(rt, k.get('ziel_name', 'Ziel'))
             kurse[key] = dict(name=k['name'], kurz=k.get('kurz', ''), sm=round(Lsum(rt) / 1852, 1), start=[round(st[0]), round(st[1])],
                               gates=G, finish=fin, route=[[round(p[0]), round(p[1])] for p in rt])
