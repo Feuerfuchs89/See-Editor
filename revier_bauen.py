@@ -1091,6 +1091,10 @@ def vorschau(cm, wm, teile, nx, ny, pfad):
 
 # ------------------------------------------------------------------ Hauptprogramm
 def main():
+    if 'cospu' in sys.argv[1:]:          # Cospudener See: eigenes Umland-Skript (Gelände, Landnutzung, Gebäude)
+        import umland_cospu
+        umland_cospu.hauptteil()
+        return
     ap = argparse.ArgumentParser(description='Seekoje Revier-Bauer')
     ap.add_argument('revier', nargs='?', default='hiddensee', choices=sorted(REVIERE))
     ap.add_argument('--cache', default='.revier-cache', help='Zwischenspeicher für Downloads')
