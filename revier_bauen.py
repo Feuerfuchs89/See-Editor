@@ -87,6 +87,7 @@ REVIERE = {
         bbox=(12.28, 51.22, 12.39, 51.31),
         zelle=20, maske=5, ufer_tol=0.5, hang=0.0,
         see_rel=285950,
+        binnen=True, binnen_namen=r'Zwenkauer See|Markkleeberger See|Wei(ß|ss)e Elster|Pleiße|Elster-Saale-Kanal|Neue Luppe|Elstermühlgraben', binnen_tief=8.0, binnen_hang=0.15,
         osm='https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf',
         umg_extra=['nwr/man_made=water_tower', 'nwr/tourism=viewpoint'],
         ohne_osm_stege=True,     # Stege am LSC/Zöbigker kommen aus dem Aufmaß des Spiels, nicht aus OSM
@@ -1134,6 +1135,7 @@ def main():
     else:
         teile, land, wf = kueste(osm['kueste'], geb, cfg)
     mim = maske(teile, geb.W, geb.H, cfg['maske'])
+    mim_see = mim
     bring = binnen(osm.get('binnen', []), geb, cfg, mim) if cfg.get('binnen') else []
     # Durchlässe (z. B. Lietzow zwischen Großem und Kleinem Jasmunder Bodden): schmale Rinne als Wasser
     durch = []
@@ -1154,7 +1156,7 @@ def main():
     if cfg.get('ohne_osm_stege'):
         env = [f for f in env if f['c'] != 'pier']
     if cfg.get('see_rel'):
-        cm, wm, quellen, (nx, ny) = see_cospu.gelaende(netz, geb, cfg, mim, teile, env)
+        cm, wm, quellen, (nx, ny) = see_cospu.gelaende(netz, geb, cfg, mim_see, teile, env, bim)
     else:
         cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim, durch)
     attr = quellen.pop('attribution', ATTRIBUTION)

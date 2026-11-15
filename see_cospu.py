@@ -157,10 +157,23 @@ def tiefe_modell(mim, geb, cfg, teile, strand_ringe):
 
 
 # ------------------------------------------------------------------ Gelände
-def gelaende(netz, geb, cfg, mim, teile, env):
+def gelaende(netz, geb, cfg, mim, teile, env, bim=None):
     cs = cfg['zelle']; nx, ny = geb.W // cs, geb.H // cs
     strand = [np.array(f['g'][0], float).reshape(-1, 2) for f in env if f.get('c') == 'beach' and f.get('t') == 'P' and f.get('g')]
     tiefe, wm = tiefe_modell(mim, geb, cfg, teile, strand)
+    wm_see = wm.copy()                       # Cospudener See allein (Pegelmessung, Eichung)
+    if bim is not None:                      # Nachbarseen/Flüsse (Zwenkauer See, Elster …): einfache Hangtiefe
+        mc = cfg['maske']; f = cs // mc
+        B5 = np.asarray(bim) >= 128; n5y, n5x = ny * f, nx * f
+        B5 = B5[:n5y, :n5x]
+        if B5.shape == (n5y, n5x) and B5.any():
+            wmb = B5.reshape(ny, f, nx, f).mean(axis=(1, 3)) >= 0.5
+            dB = ndimage.distance_transform_edt(B5) * mc
+            dB = dB.reshape(ny, f, nx, f).mean(axis=(1, 3))
+            tb = np.minimum(cfg.get('binnen_tief', 8.0), 0.5 + np.maximum(dB, mc * 0.5) * cfg.get('binnen_hang', 0.15))
+            neu = wmb & ~wm
+            tiefe = np.where(neu, tb, tiefe); wm = wm | wmb
+            log(f'  Nachbarseen/Flüsse: {int(neu.sum() * cs * cs / 1e4)} ha Wasser (Tiefe bis {cfg.get("binnen_tief", 8.0):.0f} m)')
     xs = (np.arange(nx) + 0.5) * cs; ys = geb.H - (np.arange(ny) + 0.5) * cs
     gx, gy = np.meshgrid(xs, ys)
     X, Y = gx + geb.ox, gy + geb.oy
@@ -188,8 +201,8 @@ def gelaende(netz, geb, cfg, mim, teile, env):
         h = np.full(gx.shape, PEGEL_NENN + 1.0); quellen['hoehe'] = 'keine Daten (flach)'
     h = rb.fuellen(h, np.ones_like(h, bool))
     # Wasserspiegel aus dem Seegebiet messen (mind. 100 m vom Ufer)
-    dist = ndimage.distance_transform_edt(wm) * cs
-    sel = wm & (dist >= 100)
+    dist = ndimage.distance_transform_edt(wm_see) * cs
+    sel = wm_see & (dist >= 100)
     pegel = float(np.nanmedian(h[sel])) if ok and sel.any() else PEGEL_NENN
     log(f'  Wasserspiegel gemessen {pegel:.2f} m ü. NHN (Vorgabe {PEGEL_NENN} m)')
     if abs(pegel - PEGEL_NENN) > 2.0:
