@@ -932,10 +932,15 @@ def export(r, cfg, meta, cm, cs, env, aus, utm, geo):
         haefen.append(dict(name=kd['name'], file=name, x0=int(x0), y0=int(y0), cs=kcs, n=max(nxk, nyk), nx=nxk, ny=nyk, art='kreide', stege=[]))
         log(f'  Kliffs {kd["name"]}: {nxk * kcs / 1000:.1f} × {nyk * kcs / 1000:.1f} km, {nk} Kliff-Linien, Kreide {(mskk == 5).mean() * 100:.1f} %, Kies {(mskk == 4).mean() * 100:.1f} %, höchste Wand {float(np.where(mskk == 5, zk, 0).max()):.0f} m')
     # --- Straßennetz (Autobahn bis Wohnstraße) als eigene Datei
-    SKL = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential']
+    SKL = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'cycleway', 'path', 'track', 'footway']
     wege = []; npt = 0
     for f_ in env:
-        if f_.get('c') != 'road' or f_.get('t') != 'L':
+        if f_.get('t') != 'L':
+            continue
+        if f_.get('c') == 'path':
+            if not cfg.get('fusswege'):
+                continue          # Rad-/Wanderwege (Rundweg) nur wo gewünscht
+        elif f_.get('c') != 'road':
             continue
         k = (f_.get('s') or '').replace('_link', '')
         if k not in SKL:
