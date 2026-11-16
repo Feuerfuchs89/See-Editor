@@ -102,13 +102,3 @@ Hat ein übernommenes Gewässer den OSM-Tag `ele`, bietet der Editor an, ihn als
 3. **Höhen grob (Vorschau):** „Höhen grob laden (90 m)“ ruft Copernicus DEM GLO-90 über Open-Meteo ab (CC BY 4.0, kostenlos nur nicht-kommerziell, Namensnennung nötig; Oberflächenmodell, für Ufergestaltung zu grob).
 4. **Export:** „Umgebung GeoJSON“ (WGS84), „Spiel-Export (m)“ (JSON in Metern, UTM33, Ursprung SW-Ecke: Objekte, Tonnen, Uferlinien, Tiefenpunkte, Umgebung), „Höhen .asc“ (ESRI-ASCII-Grid, EPSG:25833, Norden oben) und „Höhen .r16“ (16-Bit-RAW little-endian, Norden oben; 0 = Minimum, 65535 = Maximum, Werte stehen im Dateinamen).
 Hinweise: Höhenraster werden als Uint16 (5-cm-Stufen) im Projekt gespeichert. Für Unity/Unreal muss das RAW ggf. auf 2^n+1 skaliert werden. Das DGM1 ist ein Geländemodell ohne Gebäude/Bäume; die Seetiefe ist darin nicht enthalten.
-
-## Cospudener See (Revier `cospu`, Binnensee)
-Eingabewert der Action: `cospu`. Erzeugt dieselben Dateien wie die Küstenreviere (`cospu-revier.json`, `cospu-gelaende.bin`, `cospu-umgebung.json`, `cospu-spiel.json`, Kacheln, Hafenausschnitte) und zusätzlich `cospu-lage.json`.
-- **Ufer und Inseln:** OSM-Relation 285950 in voller Auflösung (0,5 m), Land = Revier-Rechteck minus See.
-- **Tiefen:** EMODnet deckt Binnenseen nicht ab. Die Tiefen sind ein **Modell**, geeicht an Fläche 4,36 km², max. 54 m, Volumen 109 Mio. m³ (mittlere Tiefe ca. 25 m): flache Strände (1:25), steile Hänge, tiefe Mitte, Flachwasser um die Inseln. KEINE Messung.
-- **Gelände:** amtliches DGM Sachsen (GeoSN), sonst Copernicus GLO-30 mit herausgerechneten Baumkronen und Dächern. Der Wasserspiegel (Vorgabe 110,7 m ü. NHN) wird aus dem Gelände nachgemessen und im Log gemeldet.
-- **OSM:** Gebäude mit Höhe und Dachform (`rf`), Wald, Landnutzung, Straßen, Wege, Strände, Wassertürme, Aussichtstürme. OSM-Stege werden weggelassen (Stege kommen aus dem Aufmaß im Spiel).
-- **Hafenausschnitte (4 m):** Leipziger Seesportclub und Hafen Zöbigker.
-- **`cospu-lage.json`:** Umrechnung vom alten Spielsystem (Ost/Nord, Ursprung Seemitte) ins Revier-System, LSC-Uferpunkt mit Wasserrichtung, Aufmaße (Stege Zöbigker, Steg Nordufer, Tonnen, Inseln) im neuen System.
-- Code: `see_cospu.py`; `umland_cospu.py` liefert Einpassung und Geländequellen. `lsc-hafen-merkzettel.md` hält den Stand des LSC-Hafens fest.

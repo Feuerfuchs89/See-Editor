@@ -84,7 +84,7 @@ REVIERE = {
         name='Cospudener See (Leipzig)',
         spielname='Cospudener See',
         # See (OSM-Relation 285950) mit 2,6 km Umland; Ufer/Gelände/Tiefen/Gebäude: siehe see_cospu.py
-        bbox=(12.28, 51.22, 12.39, 51.31),
+        bbox=(12.22, 51.17, 12.39, 51.31), bbox_tag='3',   # nach Süden erweitert: ganzer Zwenkauer See
         zelle=20, maske=5, ufer_tol=0.5, hang=0.0,
         see_rel=285950,
         binnen=True, binnen_namen=r'Zwenkauer See|Markkleeberger See|Wei(ß|ss)e Elster|Pleiße|Elster-Saale-Kanal|Neue Luppe|Elstermühlgraben', binnen_tief=8.0, binnen_hang=0.15,
@@ -182,6 +182,10 @@ REVIERE['usedom']['haefen'] = [
     dict(name='Peenemünde', mitte=(13.76263, 54.14229), groesse=2400),
     dict(name='Ueckermünde', mitte=(14.0650, 53.7410), groesse=2400),
     dict(name='Mönkebude', mitte=(13.9700, 53.7750), groesse=1600),
+]
+REVIERE['cospu']['bruecken'] = [
+    # A 38 über das Kiestal südlich vom Cospudener See: rote Bogenbrücke (3 Stahlbögen), ca. 73 m
+    dict(name='A 38 Bogenbrücke', art='bogen', pos=(12.3373, 51.2467), radius=150, anlauf=10, hoehe=0),
 ]
 REVIERE['usedom']['bruecken'] = [
     dict(name='Peenebrücke Wolgast', art='klapp', bbox=(13.7775, 54.0512, 13.7942, 54.0586),
@@ -348,8 +352,10 @@ class Netz:
         self.cache = cache; self.offline = offline
         os.makedirs(cache, exist_ok=True)
 
+    tag = ''
+
     def _pfad(self, name):
-        return os.path.join(self.cache, name)
+        return os.path.join(self.cache, (self.tag + '_' if self.tag else '') + name)
 
     def datei(self, name, url, params=None, pflicht=False, nur_pfad=False):
         p = self._pfad(name)
@@ -392,7 +398,7 @@ UMG_FILTER = [
     'nwr/harbour', 'w/waterway=river,canal,stream,ditch,dock',
     'n/place=city,town,village,hamlet,isolated_dwelling,island,islet,locality,peninsula', 'n/natural=peak,cape']
 TEILE = {'kueste': ['w/natural=coastline'], 'seezeichen': ['nwr/seamark:type'], 'umgebung': UMG_FILTER,
-         'binnen': ['wr/natural=water', 'wr/waterway=riverbank', 'wr/landuse=basin', 'wr/harbour=yes']}
+         'binnen': ['wr/natural=water', 'wr/waterway=riverbank', 'wr/landuse=basin', 'wr/harbour=yes', 'w/waterway=river,canal']}
 
 
 def osm_daten(netz, geb, cfg, mit_umgebung=True):
@@ -709,6 +715,21 @@ def binnen(feats, geb, cfg, mim):
         g = f.get('geometry') or {}
         nm = (f.get('properties') or {}).get('name') or ''
         polys = [g['coordinates']] if g.get('type') == 'Polygon' else g.get('coordinates', []) if g.get('type') == 'MultiPolygon' else []
+        if g.get('type') in ('LineString', 'MultiLineString') and nre and re.search(nre, nm):
+            # Flussläufe (Weiße Elster, Pleiße, Neue Luppe …) als Wasserband mit Breite nach Name
+            br = 30 if re.search(r'Elster-Saale|Wei(ß|ss)e Elster', nm) else 24 if re.search(r'Luppe', nm) else 22 if re.search(r'Pleiße', nm) else 16   # etwas breiter als echt: Gelände-Raster 20 m
+            for ln in ([g['coordinates']] if g['type'] == 'LineString' else g['coordinates']):
+                if len(ln) < 2:
+                    continue
+                lo, la = np.array(ln)[:, :2].T; x, y = geb.to_m(lo, la)
+                for k in range(len(x) - 1):
+                    dx, dy = x[k + 1] - x[k], y[k + 1] - y[k]; L = math.hypot(dx, dy)
+                    if L < 0.5:
+                        continue
+                    ux, uy = dx / L, dy / L; nx_, ny_ = -uy * br / 2, ux * br / 2; e = br / 2
+                    a0, b0, a1, b1 = x[k] - ux * e, y[k] - uy * e, x[k + 1] + ux * e, y[k + 1] + uy * e
+                    kand.append([(a0 + nx_, b0 + ny_), (a1 + nx_, b1 + ny_), (a1 - nx_, b1 - ny_), (a0 - nx_, b0 - ny_)]); benannt.append(True)
+            continue
         for pg in polys:
             if not pg or len(pg[0]) < 4:
                 continue
@@ -1127,6 +1148,8 @@ def main():
     geb = Gebiet(cfg['bbox'], cfg['zelle'])
     log(f'Revier {cfg["name"]}: {geb.W / 1000:.1f} × {geb.H / 1000:.1f} km, Ursprung UTM33 {geb.ox} / {geb.oy}')
     netz = Netz(a.cache, a.offline)
+    if cfg.get('bbox_tag') and not a.offline:
+        netz.tag = 'b' + str(cfg['bbox_tag'])      # Zwischenspeicher passend zum Ausschnitt
 
     osm = osm_daten(netz, geb, cfg, not a.ohne_umgebung)
     lage_j = None

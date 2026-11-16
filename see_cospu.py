@@ -172,7 +172,7 @@ def gelaende(netz, geb, cfg, mim, teile, env, bim=None):
             dB = dB.reshape(ny, f, nx, f).mean(axis=(1, 3))
             tb = np.minimum(cfg.get('binnen_tief', 8.0), 0.5 + np.maximum(dB, mc * 0.5) * cfg.get('binnen_hang', 0.15))
             neu = wmb & ~wm
-            tiefe = np.where(neu, tb, tiefe); wm = wm | wmb
+            tiefe = np.where(neu, -tb, tiefe); wm = wm | wmb
             log(f'  Nachbarseen/Flüsse: {int(neu.sum() * cs * cs / 1e4)} ha Wasser (Tiefe bis {cfg.get("binnen_tief", 8.0):.0f} m)')
     xs = (np.arange(nx) + 0.5) * cs; ys = geb.H - (np.arange(ny) + 0.5) * cs
     gx, gy = np.meshgrid(xs, ys)

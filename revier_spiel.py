@@ -454,6 +454,26 @@ def bruecken(env, meta, cfg, ll2m):
     """Brücken aus OSM-Straßen verketten, alle 6 m abtasten und Wasser/Land markieren."""
     out = []
     for bd in cfg.get('bruecken', []):
+        if bd.get('art') == 'bogen':
+            # Brücke aus dem OSM-Brückenpolygon (man_made=bridge): Mittellinie entlang der Längsachse, Fahrbahn West→Ost
+            cx, cy = ll2m(*bd['pos']); best = None
+            for f_ in env:
+                if f_.get('c') == 'bridge' and f_.get('t') == 'P' and f_.get('g'):
+                    Q = np.array(f_['g'][0], float).reshape(-1, 2)
+                    d_ = float(np.hypot(Q[:, 0].mean() - cx, Q[:, 1].mean() - cy))
+                    if d_ < bd.get('radius', 120) and (best is None or d_ < best[0]):
+                        best = (d_, Q)
+            if best is None:
+                log(f'  WARNUNG Brücke {bd["name"]}: kein Brückenpolygon in OSM gefunden'); continue
+            Q = best[1][:-1] if np.allclose(best[1][0], best[1][-1]) else best[1]
+            c0 = Q.mean(axis=0); u_, s_, vt = np.linalg.svd(Q - c0); ax_ = vt[0] if vt[0][0] >= 0 else -vt[0]
+            tt = (Q - c0) @ ax_; ext = bd.get('anlauf', 10)
+            t0, t1 = float(tt.min()) - ext, float(tt.max()) + ext
+            n = max(2, int((t1 - t0) // 6) + 1)
+            pts = [(c0[0] + ax_[0] * (t0 + (t1 - t0) * k / (n - 1)), c0[1] + ax_[1] * (t0 + (t1 - t0) * k / (n - 1))) for k in range(n)]
+            b = dict(n=bd['name'], art='bogen', pts=[int(round(v)) for q in pts for v in q], nass=[0] * n, laenge=int(t1 - t0),
+                     **{k: v for k, v in bd.items() if k not in ('bbox', 'wahl', 'name', 'art', 'pos', 'radius', 'anlauf')})
+            out.append(b); log(f'  Brücke {bd["name"]}: {t1 - t0:.0f} m aus OSM-Polygon (Bogenbrücke)'); continue
         (ax, ay), (bx, by) = ll2m(*bd['bbox'][:2]), ll2m(*bd['bbox'][2:])
         x0, y0, x1, y1 = min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)
         wahl = bd['wahl']; kanten = {}
