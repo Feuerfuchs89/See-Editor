@@ -453,6 +453,34 @@ def wahrzeichen(env, cfg, ll2m, wdist, meta=None, Rn=None):
 def bruecken(env, meta, cfg, ll2m):
     """Brücken aus OSM-Straßen verketten, alle 6 m abtasten und Wasser/Land markieren."""
     out = []
+    if cfg.get('autobahn_bruecken'):
+        # Alle OSM-Brückenpolygone an Autobahn/Schnellstraße → Fahrbahnplatte (Pfeiler, Leitplanken), Tal bleibt frei
+        bog = [ll2m(*bd['pos']) for bd in cfg.get('bruecken', []) if bd.get('art') == 'bogen']
+        sl = []
+        for f_ in env:
+            if f_.get('c') == 'road' and f_.get('t') == 'L' and (f_.get('s') or '').replace('_link', '') in ('motorway', 'trunk') and f_.get('g'):
+                g_ = np.array(f_['g'], float).reshape(-1, 2)
+                for a_, b_ in zip(g_[:-1], g_[1:]):
+                    n_ = max(1, int(np.hypot(*(b_ - a_)) // 10)); sl += [a_ + (b_ - a_) * k / n_ for k in range(n_)]
+        sl = np.array(sl) if sl else np.zeros((0, 2)); nb = 0
+        for f_ in env:
+            if not (f_.get('c') == 'bridge' and f_.get('t') == 'P' and f_.get('g')) or not len(sl):
+                continue
+            Q = np.array(f_['g'][0], float).reshape(-1, 2)
+            if np.allclose(Q[0], Q[-1]):
+                Q = Q[:-1]
+            c0 = Q.mean(axis=0)
+            if min(float(np.hypot(sl[:, 0] - c0[0], sl[:, 1] - c0[1]).min()), 1e9) > 35 or any(np.hypot(c0[0] - b[0], c0[1] - b[1]) < 150 for b in bog):
+                continue
+            u_, s_, vt = np.linalg.svd(Q - c0); ax_ = vt[0] if vt[0][0] >= 0 else -vt[0]
+            tt = (Q - c0) @ ax_; qq = (Q - c0) @ vt[1]; t0, t1 = float(tt.min()) - 10, float(tt.max()) + 10; n = max(2, int((t1 - t0) // 6) + 1)
+            if t1 - t0 < 30:
+                continue
+            pts = [(c0[0] + ax_[0] * (t0 + (t1 - t0) * k / (n - 1)), c0[1] + ax_[1] * (t0 + (t1 - t0) * k / (n - 1))) for k in range(n)]
+            nb += 1
+            out.append(dict(n=f'Autobahnbrücke {nb}', art='platte', pts=[int(round(v)) for q in pts for v in q], nass=[0] * n, laenge=int(t1 - t0),
+                            hw=round(float(min(20, max(6, (qq.max() - qq.min()) / 2))), 1), hoehe=0))
+        log(f'  {nb} Autobahnbrücken (Fahrbahnplatten) aus OSM-Polygonen')
     for bd in cfg.get('bruecken', []):
         if bd.get('art') == 'bogen':
             # Brücke aus dem OSM-Brückenpolygon (man_made=bridge): Mittellinie entlang der Längsachse, Fahrbahn West→Ost

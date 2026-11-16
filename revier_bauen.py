@@ -90,6 +90,7 @@ REVIERE = {
         binnen=True, binnen_namen=r'Zwenkauer See|Markkleeberger See|Wei(ß|ss)e Elster|Pleiße|Elster-Saale-Kanal|Neue Luppe|Elstermühlgraben', binnen_tief=8.0, binnen_hang=0.15,
         osm='https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf',
         umg_extra=['nwr/man_made=water_tower', 'nwr/tourism=viewpoint'],
+        autobahn_damm=True, autobahn_bruecken=True,   # A 38 auf Damm, OSM-Brücken als Fahrbahnplatten
         fusswege=True,           # Rundweg (Rad-/Fußwege) ins Straßennetz exportieren
         ohne_osm_stege=True,     # Stege am LSC/Zöbigker kommen aus dem Aufmaß des Spiels, nicht aus OSM
         regatten=['Regatta Cospudener See'],

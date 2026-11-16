@@ -108,6 +108,38 @@ def poly_maske(polys, W, H, cs, nx, ny, fuell=1):
     return np.asarray(im) > 0
 
 
+def autobahn_damm(rel, wm, env, geb, cs, nx, ny, hoehe=3.5, hw=14.0, boeschung=0.35):
+    """Autobahnen (A 38 …) verlaufen in Wirklichkeit auf einem Damm: Gelände entlang der Trasse um 'hoehe' m anheben
+    (Krone folgt dem auf ~150 m geglätteten Gelände, Böschung 1:3). Unter OSM-Brücken bleibt das Tal frei."""
+    br = [np.array(f['g'][0], float).reshape(-1, 2) for f in env if f.get('c') == 'bridge' and f.get('t') == 'P' and f.get('g')]
+    bm = ndimage.binary_dilation(poly_maske(br, geb.W, geb.H, cs, nx, ny), iterations=1) if br else np.zeros((ny, nx), bool)
+    out = rel.copy(); R = hw + hoehe / boeschung; m = int(R / cs) + 1; nlin = 0
+    for f in env:
+        if f.get('c') != 'road' or f.get('t') != 'L' or (f.get('s') or '').replace('_link', '') not in ('motorway', 'trunk') or not f.get('g'):
+            continue
+        g = np.array(f['g'], float).reshape(-1, 2)
+        if len(g) < 2:
+            continue
+        pts = []
+        for a, b in zip(g[:-1], g[1:]):
+            n = max(1, int(np.hypot(*(b - a)) // (cs / 2)))
+            pts += [a + (b - a) * k / n for k in range(n)]
+        pts.append(g[-1]); P = np.array(pts)
+        ix = np.clip((P[:, 0] / cs).astype(int), 0, nx - 1); iy = np.clip(((geb.H - P[:, 1]) / cs).astype(int), 0, ny - 1)
+        z0 = rel[iy, ix]; k = max(1, int(150 / (cs / 2)))
+        zs = np.convolve(np.pad(z0, k, mode='edge'), np.ones(2 * k + 1) / (2 * k + 1), 'valid')
+        top = np.maximum(zs, z0) + hoehe; nlin += 1
+        for (x, y), t, i0, j0 in zip(P, top, ix, iy):
+            ya, yb, xa, xb = max(0, j0 - m), min(ny, j0 + m + 1), max(0, i0 - m), min(nx, i0 + m + 1)
+            yy, xx = np.mgrid[ya:yb, xa:xb]
+            d = np.hypot((xx + 0.5) * cs - x, (geb.H - (yy + 0.5) * cs) - y)
+            h = t - np.maximum(0.0, d - hw) * boeschung
+            sub = out[ya:yb, xa:xb]
+            out[ya:yb, xa:xb] = np.where((h > sub) & ~wm[ya:yb, xa:xb] & ~bm[ya:yb, xa:xb] & (d <= R), h, sub)
+    log(f'  Autobahn-Damm: {nlin} Straßenabschnitte um {hoehe:.1f} m angehoben')
+    return out
+
+
 def tiefe_modell(mim, geb, cfg, teile, strand_ringe):
     """Tiefe (m, negativ) auf dem Gelände-Raster. Eichung: mittlere Tiefe = Volumen/Fläche, Maximum 54 m."""
     cs = cfg['zelle']; nx, ny = geb.W // cs, geb.H // cs; mc = cfg['maske']; f = cs // mc
@@ -217,6 +249,8 @@ def gelaende(netz, geb, cfg, mim, teile, env, bim=None):
         h = h * (1 - w) + boden * w
         h = ndimage.gaussian_filter(h, 0.8)
     rel = np.maximum(h - pegel, 0.3)
+    if cfg.get('autobahn_damm'):
+        rel = autobahn_damm(rel, wm, env, geb, cs, nx, ny, cfg.get('damm_h', 3.5))
     z = np.where(wm, tiefe, rel)
     cm = np.clip(np.round(z * 100), -32767, 32767).astype('<i2')
     quellen['wasserspiegel_nhn'] = round(pegel, 2)
