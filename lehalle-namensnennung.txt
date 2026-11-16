@@ -1,0 +1,10 @@
+Revier Leipzig–Halle (Seen, Flüsse, Auwald) – Datenquellen (im Spiel sichtbar nennen)
+
+© OpenStreetMap-Mitwirkende, ODbL 1.0 (openstreetmap.org/copyright)
+Seetiefen: Modell nach bekannten Seewerten (max. 54 m, Volumen 109 Mio. m³), KEINE Messung
+Gelände: Copernicus DEM GLO-30 © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, bereitgestellt im Rahmen von COPERNICUS durch die Europäische Union und ESA
+
+Hinweise:
+- OpenStreetMap: Die Revierdateien sind eine abgeleitete Datenbank (ODbL 1.0). Bilder/Spielszenen daraus sind „Produced Work“ und brauchen die Nennung.
+- EMODnet und Copernicus DEM: Namensnennung nötig.
+- KEINE Navigationskarte. Keine Rechtsberatung.
