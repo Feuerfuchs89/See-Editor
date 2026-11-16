@@ -262,6 +262,56 @@ def gelaende(netz, geb, cfg, mim, teile, env, bim=None):
     return cm, wm, quellen, (nx, ny)
 
 
+# ------------------------------------------------------------------ Binnenland-Revier (Leipzig–Halle): viele Seen mit verschiedenen Spiegelhöhen
+def gelaende_binnenland(netz, geb, cfg, mim, env):
+    """Gelände für ein großes Revier ohne Küste. Jeder See/Fluss hat seine eigene Spiegelhöhe (Copernicus-DEM ist über Wasser
+    eingeebnet); das Land wird relativ zum jeweils nächsten Wasser angegeben und in der Ferne weich überblendet, damit zwischen
+    Seen verschiedener Höhe keine Stufen entstehen. Wasser liegt im Spiel überall bei 0. Tiefen sind ein Modell (Uferabstand)."""
+    cs = cfg['zelle']; nx, ny = geb.W // cs, geb.H // cs
+    xs = (np.arange(nx) + 0.5) * cs; ys = geb.H - (np.arange(ny) + 0.5) * cs
+    gx, gy = np.meshgrid(xs, ys); lon, lat = geb.to_ll(gx, gy)
+    wm = np.asarray(mim.resize((nx, ny), Image.BILINEAR)) >= 128
+    quellen = dict(tiefe='Modell aus Uferabstand (max. %.0f m) – KEINE Messung' % cfg.get('binnen_tief', 6.0))
+    attr = [rb.ATTRIBUTION[0], ATTR_TIEFE]
+    h = uc.gelaende_cop(netz, lon, lat)
+    if np.isfinite(h).any():
+        quellen['hoehe'] = 'Copernicus DEM GLO-30, Baumkronen und Dächer herausgerechnet'
+        attr.append('Gelände: Copernicus DEM GLO-30 © DLR e.V. 2010–2014 und © Airbus Defence and Space GmbH 2014–2018, '
+                    'bereitgestellt im Rahmen von COPERNICUS durch die Europäische Union und ESA')
+        ok = True
+    else:
+        warn('Keine Geländehöhen – Land wird flach angenommen'); h = np.full(gx.shape, 100.0); quellen['hoehe'] = 'keine Daten (flach)'; ok = False
+    h = rb.fuellen(h, np.ones_like(h, bool))
+    if ok:
+        klass = lambda *c_: [np.array(f['g'][0], float).reshape(-1, 2) for f in env if f.get('c') in c_ and f.get('t') == 'P' and f.get('g')]
+        bed = poly_maske(klass('forest', 'scrub', 'urban', 'building'), geb.W, geb.H, cs, nx, ny)
+        w = ndimage.gaussian_filter(bed.astype(float), 1.0)
+        h = h * (1 - w) + ndimage.grey_opening(h, size=(3, 3)) * w
+        h = ndimage.gaussian_filter(h, 0.6)
+    dist = ndimage.distance_transform_edt(~wm) * cs
+    if wm.any():
+        # Spiegelhöhe je Wasserzelle: Median im 3×3-Fenster (Wasserzellen), dann nächstes Wasser für jede Landzelle
+        hw_ = np.where(wm, h, np.nan)
+        wl = np.where(wm, ndimage.median_filter(np.where(wm, h, np.nanmedian(hw_)), size=3), 0.0)
+        _, idx = ndimage.distance_transform_edt(~wm, return_indices=True)
+        nah = wl[idx[0], idx[1]]
+        fern = ndimage.gaussian_filter(nah, 60.0 / cs * 25)          # ~1,5 km weiche Höhenlage
+        a = np.clip((dist - 400.0) / 1600.0, 0, 1)
+        feld = nah * (1 - a) + fern * a
+    else:
+        feld = np.full(h.shape, float(np.nanmedian(h)))
+    rel = np.maximum(h - feld, 0.3)
+    dw = ndimage.distance_transform_edt(wm) * cs
+    tiefe = -np.minimum(cfg.get('binnen_rand', 0.6) + dw * cfg.get('binnen_hang', 0.05), cfg.get('binnen_tief', 6.0))
+    tiefe = np.minimum(tiefe, -0.3)
+    z = np.where(wm, tiefe, rel)
+    cm = np.clip(np.round(z * 100), -32767, 32767).astype('<i2')
+    quellen['attribution'] = attr
+    if wm.any():
+        log(f'  Binnenland-Gelände: {wm.sum() * cs * cs / 1e6:.1f} km² Wasser, Land bis {float(rel[~wm].max()):.0f} m über dem nächsten Wasser')
+    return cm, wm, quellen, (nx, ny)
+
+
 # ------------------------------------------------------------------ Lage und Häfen
 def vorbereiten(osm, geb, cfg):
     """Ufer, Lage (altes System → Revier), Häfen und Bahn. Ergänzt cfg['haefen'] und cfg['bahnen']."""

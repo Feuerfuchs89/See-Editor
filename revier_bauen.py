@@ -107,6 +107,27 @@ KURSE_HIDDENSEE = {
                  anker=[(13.05774, 54.46944), (13.03755, 54.53653), (13.12619, 54.62602), (13.17356, 54.60607)],
                  ziel=(13.09998, 54.52368), ziel_name='Ziel Neuendorf (Hiddensee)'),
 }
+REVIERE['lehalle'] = dict(
+    name='Leipzig–Halle (Seen, Flüsse, Auwald)', spielname='Leipzig–Halle',
+    bbox=(11.88, 51.20, 12.50, 51.52), bbox_tag='h1', zelle=40, maske=10, ufer_tol=3.0, hang=0.0,
+    binnenland=True, binnen=True, binnen_alle=True, binnen_min=25000, binnen_tief=6.0, binnen_hang=0.05, umgebung_leer=True,
+    binnen_namen=r'Hufeisensee|Wallendorfer See|Raßnitzer See|Rackwitzer See|Werbeliner See|Schladitzer See|Markkleeberger See|Störmthaler See|Cospudener See|Zwenkauer See|Kulkwitzer See|Bergwitzsee|Goitzsche|Saale$|Wei(ß|ss)e Elster|Pleiße|Elster-Saale-Kanal|Saale-Elster-Kanal|Neue Luppe|Alte Luppe|Luppe$|Elstermühlgraben|Karl-Heine-Kanal|Nahle|Weiße Mulde',
+    osm=['https://download.geofabrik.de/europe/germany/sachsen-latest.osm.pbf',
+         'https://download.geofabrik.de/europe/germany/sachsen-anhalt-latest.osm.pbf'],
+    umg_filter=['nwr/landuse=forest,residential,industrial,commercial,retail,meadow,farmland,allotments,grass,farmyard,quarry,cemetery',
+                'nwr/natural=wood,scrub,heath,wetland,sand,grassland',
+                'w/building', 'w/highway=motorway,trunk,primary,secondary,tertiary,unclassified,residential,motorway_link,trunk_link,primary_link,secondary_link,tertiary_link,cycleway',
+                'w/railway=rail', 'nwr/man_made=bridge,tower,water_tower', 'n/place=city,town,village,hamlet,locality'],
+    regatten=[],
+    bahnen={k: dict(name='Regattabahn ' + n, nahe=pos, r=3000, min_frei=300, cap=2500) for k, n, pos in [
+        ('b_cospu', 'Cospudener See', (12.3300, 51.2800)), ('b_zwenkau', 'Zwenkauer See', (12.3300, 51.2200)),
+        ('b_stoermthal', 'Störmthaler See', (12.4350, 51.2350)), ('b_markkleeberg', 'Markkleeberger See', (12.3700, 51.2500)),
+        ('b_schladitz', 'Schladitzer See', (12.3250, 51.4450)), ('b_rackwitz', 'Rackwitzer See', (12.3000, 51.4200)),
+        ('b_werbelin', 'Werbeliner See', (12.2050, 51.4050)), ('b_wallendorf', 'Wallendorfer / Raßnitzer See', (12.1000, 51.3900)),
+        ('b_hufeisen', 'Hufeisensee (Halle)', (12.0100, 51.4650)), ('b_kulkwitz', 'Kulkwitzer See', (12.2350, 51.3150))]},
+    spiel=dict(zelle=40, kachel=240, haeuser_je_kachel=9000, haus_abstand=500, land_tol=6, land_min=2000),
+)
+
 REVIERE['hiddensee']['kurse'] = KURSE_HIDDENSEE
 REVIERE['hiddensee']['bahnen'] = {'bahn': dict(name='Regattabahn vor Hiddensee (Westseite)', nahe=(13.01378, 54.54522), r=4000)}
 REVIERE['ruegen']['kurse'] = KURSE_HIDDENSEE
@@ -436,7 +457,7 @@ def osm_daten(netz, geb, cfg, mit_umgebung=True):
                 lauf('getid', '-r', rev, f'r{cfg["see_rel"]}', '-o', f, '--overwrite')
                 lauf('export', f, '-f', 'geojsonseq', '-x', 'print_record_separator=false', '-a', 'type,id', '-o', ziel[t], '--overwrite')
                 continue
-            flt = TEILE[t] + (list(cfg.get('umg_extra', [])) if t == 'umgebung' else [])
+            flt = (list(cfg['umg_filter']) if (t == 'umgebung' and cfg.get('umg_filter')) else TEILE[t]) + (list(cfg.get('umg_extra', [])) if t == 'umgebung' else [])
             lauf('tags-filter', rev, *flt, '-o', f, '--overwrite')
             extra = ['-c', konf] if t == 'kueste' else []      # Küste als Linien: Wegrichtung (Land links) bleibt erhalten
             lauf('export', f, '-f', 'geojsonseq', '-x', 'print_record_separator=false', '-a', 'type,id', *extra, '-o', ziel[t], '--overwrite')
@@ -718,7 +739,7 @@ def binnen(feats, geb, cfg, mim):
         polys = [g['coordinates']] if g.get('type') == 'Polygon' else g.get('coordinates', []) if g.get('type') == 'MultiPolygon' else []
         if g.get('type') in ('LineString', 'MultiLineString') and nre and re.search(nre, nm):
             # Flussläufe (Weiße Elster, Pleiße, Neue Luppe …) als Wasserband mit Breite nach Name
-            br = 30 if re.search(r'Elster-Saale|Wei(ß|ss)e Elster', nm) else 24 if re.search(r'Luppe', nm) else 22 if re.search(r'Pleiße', nm) else 16   # etwas breiter als echt: Gelände-Raster 20 m
+            br = 45 if re.fullmatch(r'Saale', nm) else 30 if re.search(r'Elster-Saale|Saale-Elster|Wei(ß|ss)e Elster', nm) else 24 if re.search(r'Luppe', nm) else 22 if re.search(r'Pleiße', nm) else 16   # etwas breiter als echt: Gelände-Raster 20 m
             for ln in ([g['coordinates']] if g['type'] == 'LineString' else g['coordinates']):
                 if len(ln) < 2:
                     continue
@@ -751,7 +772,7 @@ def binnen(feats, geb, cfg, mim):
         im = Image.new('L', (i1 - i0, j1 - j0), 0); ImageDraw.Draw(im).polygon([(a - i0, b - j0) for a, b in f(P)], fill=1)
         return (j0, j1, i0, i1, np.asarray(im).astype(bool))
     R_ = [raster(P) for P in kand]
-    behalten = list(benannt); neu = True; runde = 0; it = max(1, int(math.ceil(cfg.get('binnen_verbindung', 10) / cs)))
+    behalten = list(benannt) if not cfg.get('binnen_alle') else [True] * len(kand); neu = True; runde = 0; it = max(1, int(math.ceil(cfg.get('binnen_verbindung', 10) / cs)))
     for k, b in enumerate(benannt):
         if b and R_[k] is not None:
             j0, j1, i0, i1, m = R_[k]; M[j0:j1, i0:i1] |= m
@@ -1154,7 +1175,9 @@ def main():
 
     osm = osm_daten(netz, geb, cfg, not a.ohne_umgebung)
     lage_j = None
-    if cfg.get('see_rel'):       # Binnensee (Cospudener See): Ufer aus OSM-Relation, Tiefen als Modell – siehe see_cospu.py
+    if cfg.get('binnenland'):    # großes Binnenland-Revier ohne Küste: alles Wasser aus OSM-Flächen
+        teile, land, wf, lage_j = [], [], 0.0, None
+    elif cfg.get('see_rel'):       # Binnensee (Cospudener See): Ufer aus OSM-Relation, Tiefen als Modell – siehe see_cospu.py
         import see_cospu
         teile, land, wf, lage_j = see_cospu.vorbereiten(osm, geb, cfg)
     else:
@@ -1180,7 +1203,11 @@ def main():
     env = [] if a.ohne_umgebung else umgebung(osm['umgebung'], geb, std)
     if cfg.get('ohne_osm_stege'):
         env = [f for f in env if f['c'] != 'pier']
-    if cfg.get('see_rel'):
+    if cfg.get('binnenland'):
+        import see_cospu
+        cm, wm, quellen, (nx, ny) = see_cospu.gelaende_binnenland(netz, geb, cfg, mim, env)
+        wf = float(wm.sum()) * cfg['zelle'] ** 2
+    elif cfg.get('see_rel'):
         cm, wm, quellen, (nx, ny) = see_cospu.gelaende(netz, geb, cfg, mim_see, teile, env, bim)
     else:
         cm, wm, quellen, (nx, ny) = gelaende(netz, geb, cfg, mim, bim, durch)
@@ -1232,7 +1259,7 @@ def main():
     json.dump(dict(format='seekoje-umgebung-1', revier=r, attribution=ATTRIBUTION[:1],
                    legende='t: N=Punkt [x,y], L=Linie [x,y,x,y…], P=Fläche [[Außenring],[Loch]…] als flache Listen in m; '
                            'c=Klasse, s=OSM-Unterart, n=Name, h=Höhe m, hs=Höhenquelle',
-                   features=env),
+                   features=([] if cfg.get('umgebung_leer') else env)),
               open(P('umgebung.json'), 'w', encoding='utf-8'), ensure_ascii=False, separators=(',', ':'))
     vorschau(cm, wm, teile, nx, ny, P('vorschau.png'))
     open(P('namensnennung.txt'), 'w', encoding='utf-8').write(
