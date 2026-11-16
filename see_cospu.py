@@ -108,7 +108,7 @@ def poly_maske(polys, W, H, cs, nx, ny, fuell=1):
     return np.asarray(im) > 0
 
 
-def autobahn_damm(rel, wm, env, geb, cs, nx, ny, hoehe=3.5, hw=14.0, boeschung=0.35):
+def autobahn_damm(rel, wm, env, geb, cs, nx, ny, hoehe=3.5, hw=14.0, boeschung=0.25):
     """Autobahnen (A 38 …) verlaufen in Wirklichkeit auf einem Damm: Gelände entlang der Trasse um 'hoehe' m anheben
     (Krone folgt dem auf ~150 m geglätteten Gelände, Böschung 1:3). Unter OSM-Brücken bleibt das Tal frei."""
     br = [np.array(f['g'][0], float).reshape(-1, 2) for f in env if f.get('c') == 'bridge' and f.get('t') == 'P' and f.get('g')]
@@ -129,13 +129,16 @@ def autobahn_damm(rel, wm, env, geb, cs, nx, ny, hoehe=3.5, hw=14.0, boeschung=0
         z0 = rel[iy, ix]; k = max(1, int(150 / (cs / 2)))
         zs = np.convolve(np.pad(z0, k, mode='edge'), np.ones(2 * k + 1) / (2 * k + 1), 'valid')
         top = np.maximum(zs, z0) + hoehe; nlin += 1
-        for (x, y), t, i0, j0 in zip(P, top, ix, iy):
+        tal = z0 < zs - 2.0                      # Tal-/Einschnittpunkte (unter Brücken): nicht auffüllen
+        for (x, y), t, i0, j0, tl in zip(P, top, ix, iy, tal):
+            if tl:
+                continue
             ya, yb, xa, xb = max(0, j0 - m), min(ny, j0 + m + 1), max(0, i0 - m), min(nx, i0 + m + 1)
             yy, xx = np.mgrid[ya:yb, xa:xb]
             d = np.hypot((xx + 0.5) * cs - x, (geb.H - (yy + 0.5) * cs) - y)
             h = t - np.maximum(0.0, d - hw) * boeschung
             sub = out[ya:yb, xa:xb]
-            out[ya:yb, xa:xb] = np.where((h > sub) & ~wm[ya:yb, xa:xb] & ~bm[ya:yb, xa:xb] & (d <= R), h, sub)
+            out[ya:yb, xa:xb] = np.where((h > sub) & (h - sub <= hoehe + 1.0) & ~wm[ya:yb, xa:xb] & ~bm[ya:yb, xa:xb] & (d <= R), h, sub)   # Talflanken nicht zuschütten
     log(f'  Autobahn-Damm: {nlin} Straßenabschnitte um {hoehe:.1f} m angehoben')
     return out
 
